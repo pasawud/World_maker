@@ -207,6 +207,17 @@ export const BIOMES: BiomeMeta[] = [
     moveCost: 3.5,
     detailStyle: 'swamp',
   },
+  {
+    id: BiomeId.LAKE,
+    key: 'lake',
+    nameTh: 'ทะเลสาบ',
+    nameEn: 'Freshwater Lake',
+    color: '#3b8ec2',
+    isWater: true,
+    defaultElevation: -0.06,
+    moveCost: 99,
+    detailStyle: 'none',
+  },
 ];
 
 export const BIOME_BY_ID: Record<number, BiomeMeta> = Object.fromEntries(
@@ -263,6 +274,7 @@ export const LEGACY_TERRAIN_BIOME_IDS = new Set<number>([
   BiomeId.HIGHLAND,
   BiomeId.MOUNTAIN,
   BiomeId.SNOW_PEAK,
+  BiomeId.LAKE,
 ]);
 
 export const LAND_BIOMES: BiomeMeta[] = BIOMES.filter(

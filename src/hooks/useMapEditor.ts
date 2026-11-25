@@ -106,6 +106,7 @@ export function useMapEditor() {
   const [layers, setLayers] = useState<LayerVisibility>({
     grid: false,
     graticule: false,
+    currents: false,
     cityNames: true,
     labels: true,
     territories: true,
@@ -301,7 +302,11 @@ export function useMapEditor() {
             nextElev[idx] = tMeta.defaultElevation;
             if (tMeta.isWater) {
               nextBiomes[idx] =
-                activeTerrain === TerrainId.DEEP_OCEAN ? BiomeId.DEEP_OCEAN : BiomeId.SHALLOW_WATER;
+                activeTerrain === TerrainId.LAKE
+                  ? BiomeId.LAKE
+                  : activeTerrain === TerrainId.DEEP_OCEAN
+                  ? BiomeId.DEEP_OCEAN
+                  : BiomeId.SHALLOW_WATER;
               nextTerr[idx] = '';
               nextRel[idx] = '';
               nextCult[idx] = '';
@@ -603,7 +608,11 @@ export function useMapEditor() {
           nextElev[idx] = tMeta.defaultElevation;
           if (tMeta.isWater) {
             nextBiomes[idx] =
-              activeTerrain === TerrainId.DEEP_OCEAN ? BiomeId.DEEP_OCEAN : BiomeId.SHALLOW_WATER;
+              activeTerrain === TerrainId.LAKE
+                ? BiomeId.LAKE
+                : activeTerrain === TerrainId.DEEP_OCEAN
+                ? BiomeId.DEEP_OCEAN
+                : BiomeId.SHALLOW_WATER;
             nextTerr[idx] = '';
             nextRel[idx] = '';
             nextCult[idx] = '';

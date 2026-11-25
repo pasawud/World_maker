@@ -150,7 +150,7 @@ export function parseMapFromJson(raw: string): HexMapData {
   if (Array.isArray(obj.terrains) && obj.terrains.length === expectedLen) {
     terrains = obj.terrains.map((t) => {
       const n = Number(t);
-      return Number.isInteger(n) && n >= TerrainId.DEEP_OCEAN && n <= TerrainId.HIGH_PEAK
+      return Number.isInteger(n) && n >= TerrainId.DEEP_OCEAN && n <= TerrainId.LAKE
         ? n
         : TerrainId.DEEP_OCEAN;
     });
@@ -163,6 +163,8 @@ export function parseMapFromJson(raw: string): HexMapData {
         terrains[i] = TerrainId.DEEP_OCEAN;
       } else if (b === BiomeId.SHALLOW_WATER) {
         terrains[i] = TerrainId.SHALLOW_WATER;
+      } else if (b === BiomeId.LAKE) {
+        terrains[i] = TerrainId.LAKE;
       } else if (isWaterBiome(b, customBiomes)) {
         terrains[i] = TerrainId.SHALLOW_WATER;
       } else if (b === BiomeId.SNOW_PEAK) {
@@ -246,6 +248,7 @@ export function parseMapFromJson(raw: string): HexMapData {
       lonEast: Number.isFinite(Number(geoRaw.lonEast)) ? Number(geoRaw.lonEast) : 180,
       moistureScale: Number(geoRaw.moistureScale) || 1,
       riverThreshold: Number(geoRaw.riverThreshold) || 20,
+      oceanCurrents: geoRaw.oceanCurrents !== false,
     },
     terrains,
     biomes,

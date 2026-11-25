@@ -249,6 +249,7 @@ export function getHexTerrain(
   const b = map.biomes[idx];
   if (b === BiomeId.DEEP_OCEAN) return TerrainId.DEEP_OCEAN;
   if (b === BiomeId.SHALLOW_WATER) return TerrainId.SHALLOW_WATER;
+  if (b === BiomeId.LAKE) return TerrainId.LAKE;
   if (isWaterBiome(b, map.customBiomes)) {
     return map.terrains?.[idx] === TerrainId.DEEP_OCEAN
       ? TerrainId.DEEP_OCEAN
@@ -260,7 +261,7 @@ export function getHexTerrain(
   if (b === BiomeId.HILLS) return TerrainId.HILLS;
 
   const t = map.terrains?.[idx];
-  if (t !== undefined && t >= TerrainId.PLAINS && t <= TerrainId.HIGH_PEAK) {
+  if (t !== undefined && t >= TerrainId.PLAINS && t <= TerrainId.LAKE) {
     return t as TerrainId;
   }
   return TerrainId.PLAINS;
@@ -483,7 +484,8 @@ export function findHexPath(
       }
       const feat = features?.[nbIdx] ? getFeatureMeta(features[nbIdx]) : null;
       const featDelta = feat ? feat.moveCostDelta : 0;
-      const baseWater = terrain === TerrainId.SHALLOW_WATER ? 0.75 : 0.9;
+      const baseWater =
+        terrain === TerrainId.LAKE ? 0.72 : terrain === TerrainId.SHALLOW_WATER ? 0.75 : 0.9;
       return baseWater + Math.max(0, featDelta);
     }
 
@@ -493,7 +495,7 @@ export function findHexPath(
 
     // mixed mode
     if (isWater) {
-      return terrain === TerrainId.SHALLOW_WATER ? 0.8 : 0.95;
+      return terrain === TerrainId.LAKE ? 0.72 : terrain === TerrainId.SHALLOW_WATER ? 0.8 : 0.95;
     }
     return landCostForCell(curIdx, nbIdx);
   };

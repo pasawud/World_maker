@@ -37,6 +37,7 @@ const OVERLAY_MODES: { id: ClimateOverlay; label: string }[] = [
   { id: 'elevation', label: 'ความสูง' },
   { id: 'temperature', label: 'อุณหภูมิ' },
   { id: 'moisture', label: 'ความชื้น' },
+  { id: 'currents', label: 'กระแสน้ำ' },
 ];
 
 export const SubBar: React.FC<SubBarProps> = ({
@@ -66,6 +67,7 @@ export const SubBar: React.FC<SubBarProps> = ({
     { key: 'rivers', label: 'แม่น้ำ' },
     { key: 'pois', label: 'จุดสำคัญ' },
     { key: 'graticule', label: 'พิกัดโลก' },
+    { key: 'currents', label: 'กระแสน้ำ' },
   ];
 
   return (

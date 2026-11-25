@@ -33,6 +33,16 @@ export const TERRAINS: TerrainMeta[] = [
     moveCost: 99,
   },
   {
+    id: TerrainId.LAKE,
+    key: 'lake',
+    nameTh: 'ทะเลสาบ',
+    nameEn: 'Freshwater Lake',
+    color: '#3b8ec2',
+    isWater: true,
+    defaultElevation: -0.06,
+    moveCost: 99,
+  },
+  {
     id: TerrainId.PLAINS,
     key: 'plains',
     nameTh: 'ที่ราบ',
@@ -93,5 +103,9 @@ export function getTerrainMeta(id: number): TerrainMeta {
 }
 
 export function isWaterTerrain(id: number): boolean {
-  return id === TerrainId.DEEP_OCEAN || id === TerrainId.SHALLOW_WATER;
+  return (
+    id === TerrainId.DEEP_OCEAN ||
+    id === TerrainId.SHALLOW_WATER ||
+    id === TerrainId.LAKE
+  );
 }

@@ -6,6 +6,7 @@ export enum TerrainId {
   HIGHLAND = 4,
   MOUNTAIN = 5,
   HIGH_PEAK = 6,
+  LAKE = 7,
 }
 
 export enum BiomeId {
@@ -25,6 +26,7 @@ export enum BiomeId {
   SNOW_PEAK = 13,
   SWAMP = 14,
   HIGHLAND = 15,
+  LAKE = 16,
 }
 
 export type BiomeDetailStyle =
@@ -185,6 +187,7 @@ export interface GeographyConfig {
   windMode: WindMode;
   moistureScale: number;
   riverThreshold: number;
+  oceanCurrents?: boolean;
 }
 
 export interface HexCoord {
@@ -514,11 +517,13 @@ export type ClimateOverlay =
   | 'culture'
   | 'elevation'
   | 'temperature'
-  | 'moisture';
+  | 'moisture'
+  | 'currents';
 
 export interface LayerVisibility {
   grid: boolean;
   graticule?: boolean;
+  currents?: boolean;
   cityNames: boolean;
   labels: boolean;
   territories: boolean;

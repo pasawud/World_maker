@@ -17,7 +17,7 @@ import { hexDistance } from './engine/hexMath';
 import { exportMapToPng } from './engine/renderer';
 import { createInitialTimeline } from './engine/timeline';
 import { useMapEditor } from './hooks/useMapEditor';
-import { ToolMode } from './types/map';
+import { TerrainId, ToolMode } from './types/map';
 
 export function App() {
   const editor = useMapEditor();
@@ -179,6 +179,12 @@ export function App() {
           onToggleCliffBrush={() =>
             editor.setActiveFeature((cur) => (cur === 'cliff' ? null : 'cliff'))
           }
+          onToggleLakeBrush={() => {
+            editor.setActiveFeature(null);
+            editor.setActiveTerrain((cur) =>
+              cur === TerrainId.LAKE ? TerrainId.PLAINS : TerrainId.LAKE
+            );
+          }}
           terrainSubTool={editor.terrainSubTool}
           onChangeTerrainSubTool={editor.setTerrainSubTool}
           riverSubTool={editor.riverSubTool}

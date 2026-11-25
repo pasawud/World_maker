@@ -124,6 +124,7 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
             { id: 'elevation', label: 'ความสูง' },
             { id: 'temperature', label: 'อุณหภูมิ' },
             { id: 'moisture', label: 'ความชื้น & ลม' },
+            { id: 'currents', label: 'กระแสน้ำ' },
           ].map((o) => (
             <button
               key={o.id}
@@ -331,6 +332,15 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer pt-0.5 select-none">
+          <input
+            type="checkbox"
+            checked={draft.oceanCurrents !== false}
+            onChange={(e) => setDraft({ ...draft, oceanCurrents: e.target.checked })}
+            className="rounded border-slate-600 bg-[#0f1620] accent-sky-400 cursor-pointer"
+          />
+          <span>จำลองกระแสน้ำอุ่น/เย็น (ส่งผลต่ออุณหภูมิและฝนชายฝั่ง)</span>
+        </label>
       </div>
 
       <div className="space-y-2 text-[11px] text-slate-300">

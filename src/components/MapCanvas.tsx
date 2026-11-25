@@ -18,6 +18,11 @@ import { getFeatureMeta } from '../data/features';
 import { getAllGovernmentTypes, getAllPoiTypes } from '../data/goods';
 import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
 import {
+  computeOceanCurrents,
+  getCurrentCompassLabel,
+  getCurrentKind,
+} from '../engine/currents';
+import {
   findHexPath,
   getHexTerrain,
   hexDistance,
@@ -61,6 +66,7 @@ interface MapCanvasProps {
   autoShallowWater: boolean;
   onToggleAutoShallowWater: () => void;
   onToggleCliffBrush: () => void;
+  onToggleLakeBrush: () => void;
   terrainSubTool: 'brush' | 'fill' | 'eyedropper';
   onChangeTerrainSubTool: (t: 'brush' | 'fill' | 'eyedropper') => void;
   riverSubTool: 'draw' | 'erase';
@@ -126,6 +132,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     autoShallowWater,
     onToggleAutoShallowWater,
     onToggleCliffBrush,
+    onToggleLakeBrush,
     terrainSubTool,
     onChangeTerrainSubTool,
     riverSubTool,
@@ -339,6 +346,18 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     viewSize,
   ]);
 
+  const oceanCurrentField = useMemo(
+    () =>
+      computeOceanCurrents(
+        map.width,
+        map.height,
+        map.elevation,
+        map.geography,
+        map.terrains
+      ),
+    [map.elevation, map.geography, map.height, map.terrains, map.width]
+  );
+
   // Minimap
   useEffect(() => {
     if (!showMinimap) return;
@@ -362,6 +381,16 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         let color =
           climateOverlay === 'terrain'
             ? getTerrainMeta(tId).color
+            : climateOverlay === 'currents'
+            ? tId === TerrainId.LAKE
+              ? '#3b8ec2'
+              : bMeta.isWater || isWaterTerrain(tId)
+              ? oceanCurrentField.thermal[idx] >= 0.2
+                ? '#e06346'
+                : oceanCurrentField.thermal[idx] <= -0.2
+                ? '#38bdf8'
+                : '#1b496e'
+              : '#364152'
             : bMeta.isWater && !bMeta.isCustom
             ? getTerrainMeta(tId).color
             : bMeta.color;
@@ -705,6 +734,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
     const latStr = formatLatitude(getRowLatitude(hoverHex.r, map.height, map.geography));
     const lonStr = formatLongitude(getColLongitude(hoverHex.q, map.width, map.geography));
+    const isOceanHex =
+      terrain.id === TerrainId.DEEP_OCEAN || terrain.id === TerrainId.SHALLOW_WATER;
+    const curKind = isOceanHex
+      ? getCurrentKind(oceanCurrentField.thermal[idx], oceanCurrentField.speed[idx])
+      : 'none';
+    const curDir = isOceanHex
+      ? getCurrentCompassLabel(oceanCurrentField.dx[idx], oceanCurrentField.dy[idx])
+      : '';
     const city = map.cities.find((c) => c.q === hoverHex.q && c.r === hoverHex.r);
     return {
       terrain,
@@ -719,9 +756,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       moist,
       latStr,
       lonStr,
+      curKind,
+      curDir,
       city,
     };
-  }, [hoverHex, map]);
+  }, [hoverHex, map, oceanCurrentField]);
 
   const activeTerrainMeta = getTerrainMeta(activeTerrain);
   const activeBiomeMeta = getBiomeMetaWithCustom(activeBiome, map.customBiomes);
@@ -817,6 +856,18 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                 className="w-20"
               />
               <div className="h-4 w-px bg-slate-700" />
+              <button
+                onClick={onToggleLakeBrush}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
+                  activeFeature === null && activeTerrain === TerrainId.LAKE
+                    ? 'bg-sky-500/25 border-sky-400 text-sky-100 font-medium'
+                    : 'bg-[#17202b] border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+                title="ระบายทะเลสาบน้ำจืด (แยกจากมหาสมุทรและคงอยู่เมื่อคำนวณสภาพอากาศใหม่)"
+              >
+                <Droplets className="w-3.5 h-3.5 text-sky-400" />
+                <span>ทะเลสาบ</span>
+              </button>
               <button
                 onClick={onToggleCliffBrush}
                 className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
@@ -1156,8 +1207,31 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
             </span>
           )}
           <span className="text-slate-300">
-            {hoverInfo.elevM >= 0 ? `${hoverInfo.elevM.toLocaleString()} ม.` : 'ทะเล'}
+            {hoverInfo.terrain.id === TerrainId.LAKE
+              ? 'ทะเลสาบ'
+              : hoverInfo.elevM >= 0
+              ? `${hoverInfo.elevM.toLocaleString()} ม.`
+              : 'ทะเล'}
           </span>
+          {hoverInfo.curKind !== 'none' && (
+            <span
+              className={
+                hoverInfo.curKind === 'warm'
+                  ? 'text-rose-300 font-medium'
+                  : hoverInfo.curKind === 'cold'
+                  ? 'text-cyan-300 font-medium'
+                  : 'text-teal-300'
+              }
+            >
+              🌊{' '}
+              {hoverInfo.curKind === 'warm'
+                ? 'กระแสน้ำอุ่น'
+                : hoverInfo.curKind === 'cold'
+                ? 'กระแสน้ำเย็น'
+                : 'กระแสน้ำกลาง'}{' '}
+              ({hoverInfo.curDir})
+            </span>
+          )}
           <span className="text-sky-300">{hoverInfo.temp.toFixed(1)}°C</span>
           {hoverInfo.city && (
             <span className="text-amber-300 font-semibold">★ {hoverInfo.city.name}</span>

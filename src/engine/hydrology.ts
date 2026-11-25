@@ -76,7 +76,7 @@ export function deriveElevationFromBiomes(
 
   for (let i = 0; i < total; i++) {
     const b = biomes[i];
-    if (b === BiomeId.DEEP_OCEAN || b === BiomeId.SHALLOW_WATER) {
+    if (b === BiomeId.DEEP_OCEAN || b === BiomeId.SHALLOW_WATER || b === BiomeId.LAKE) {
       distFromOcean[i] = 0;
       queue[tail++] = i;
     }
@@ -203,7 +203,7 @@ export function generateRiversAuto(
   const isWater = new Uint8Array(total);
   for (let i = 0; i < total; i++) {
     const b = biomes[i];
-    if (b === BiomeId.DEEP_OCEAN || b === BiomeId.SHALLOW_WATER) {
+    if (b === BiomeId.DEEP_OCEAN || b === BiomeId.SHALLOW_WATER || b === BiomeId.LAKE) {
       isWater[i] = 1;
     }
   }

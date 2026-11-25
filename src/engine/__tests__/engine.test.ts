@@ -39,6 +39,11 @@ import {
 } from '../timeline';
 import { computeCityTradeOverview, estimateRouteTradeValue } from '../trade';
 import {
+  computeOceanCurrents,
+  getCurrentKind,
+  traceOceanCurrentStreams,
+} from '../currents';
+import {
   autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
@@ -1130,5 +1135,128 @@ describe('Real Earth, Lat/Lon, Sea Level & 2D Wind System', () => {
     const migrated = parseMapFromJson(JSON.stringify(legacy));
     expect(migrated.geography.lonWest).toBe(-180);
     expect(migrated.geography.lonEast).toBe(180);
+  });
+});
+
+describe('Ocean Currents & Freshwater Lake System', () => {
+  it('computes warm western-boundary and cold eastern-boundary currents, excludes lakes/land, and traces streams', () => {
+    const w = 40;
+    const h = 24;
+    const elev = new Array<number>(w * h).fill(-0.5);
+    const terrains = new Array<number>(w * h).fill(TerrainId.DEEP_OCEAN);
+
+    // Mid-latitude continent from q=12..26, r=4..18
+    for (let r = 4; r <= 18; r++) {
+      for (let q = 12; q <= 26; q++) {
+        const idx = hexIndex(q, r, w);
+        elev[idx] = 0.2;
+        terrains[idx] = TerrainId.PLAINS;
+      }
+    }
+    // Freshwater lake inside the continent
+    const lakeIdx = hexIndex(18, 10, w);
+    elev[lakeIdx] = -0.06;
+    terrains[lakeIdx] = TerrainId.LAKE;
+
+    const cfg = {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      latNorth: 55,
+      latSouth: 15,
+      windMode: 'latitude' as const,
+      oceanCurrents: true,
+    };
+
+    const currents = computeOceanCurrents(w, h, elev, cfg, terrains);
+    // East of continent (western ocean boundary, q=28, r=10) -> Warm current
+    const warmIdx = hexIndex(28, 10, w);
+    expect(getCurrentKind(currents.thermal[warmIdx], currents.speed[warmIdx])).toBe('warm');
+    // West of continent (eastern ocean boundary, q=10, r=10) -> Cold current
+    const coldIdx = hexIndex(10, 10, w);
+    expect(getCurrentKind(currents.thermal[coldIdx], currents.speed[coldIdx])).toBe('cold');
+    // Land and Lake hexes have zero ocean current
+    expect(currents.speed[hexIndex(15, 10, w)]).toBe(0);
+    expect(currents.speed[lakeIdx]).toBe(0);
+
+    const streams = traceOceanCurrentStreams(w, h, elev, currents, terrains);
+    expect(streams.length).toBeGreaterThan(0);
+    expect(streams.some((s) => s.kind === 'warm')).toBe(true);
+    expect(streams.some((s) => s.kind === 'cold')).toBe(true);
+  });
+
+  it('ocean currents warm & humidify western-boundary coasts relative to cold eastern-boundary coasts', () => {
+    const w = 40;
+    const h = 24;
+    const elev = new Array<number>(w * h).fill(-0.5);
+    const terrains = new Array<number>(w * h).fill(TerrainId.DEEP_OCEAN);
+    for (let r = 4; r <= 18; r++) {
+      for (let q = 12; q <= 26; q++) {
+        const idx = hexIndex(q, r, w);
+        elev[idx] = 0.14;
+        terrains[idx] = TerrainId.PLAINS;
+      }
+    }
+    const cfg = {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      latNorth: 55,
+      latSouth: 15,
+      windMode: 'latitude' as const,
+      oceanCurrents: true,
+    };
+    const withCur = simulateClimate(elev, w, h, cfg, terrains);
+    const noCur = simulateClimate(elev, w, h, { ...cfg, oceanCurrents: false }, terrains);
+
+    const eastCoast = hexIndex(26, 10, w); // adjacent to warm western-boundary current
+    const westCoast = hexIndex(12, 10, w); // adjacent to cold eastern-boundary current
+    expect(withCur.temperature[eastCoast]).toBeGreaterThan(withCur.temperature[westCoast] + 2);
+    expect(withCur.temperature[eastCoast]).toBeGreaterThan(noCur.temperature[eastCoast] + 1);
+    expect(withCur.temperature[westCoast]).toBeLessThan(noCur.temperature[westCoast] - 1);
+    expect(withCur.moisture[eastCoast]).toBeGreaterThan(noCur.moisture[eastCoast]);
+    expect(withCur.moisture[westCoast]).toBeLessThan(noCur.moisture[westCoast]);
+  });
+
+  it('preserves freshwater lakes across syncShallowWater, climate recompute, goods suggestion, and JSON serialization', () => {
+    const w = 16;
+    const h = 14;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.14);
+    map.features = new Array<string>(w * h).fill('');
+    map.rivers = [];
+
+    const lakeCoords = [
+      { q: 7, r: 7 },
+      { q: 8, r: 7 },
+    ];
+    for (const c of lakeCoords) {
+      const idx = hexIndex(c.q, c.r, w);
+      map.terrains[idx] = TerrainId.LAKE;
+      map.biomes[idx] = BiomeId.LAKE;
+      map.elevation[idx] = -0.06;
+    }
+
+    const synced = syncShallowWater(map);
+    expect(synced.biomes[hexIndex(7, 7, w)]).toBe(BiomeId.LAKE);
+    expect(synced.terrains[hexIndex(7, 7, w)]).toBe(TerrainId.LAKE);
+
+    const recomputed = recomputeBiomesFromCurrentMap(map);
+    expect(recomputed.biomes[hexIndex(7, 7, w)]).toBe(BiomeId.LAKE);
+    expect(recomputed.terrains[hexIndex(7, 7, w)]).toBe(TerrainId.LAKE);
+
+    const goods = autoSuggestGoodsForCity(map, 6, 7);
+    expect(goods.producedGoods).toContain('fish');
+    expect(goods.producedGoods).toContain('wheat');
+
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+    expect(restored.terrains[hexIndex(7, 7, w)]).toBe(TerrainId.LAKE);
+    expect(restored.biomes[hexIndex(7, 7, w)]).toBe(BiomeId.LAKE);
+    expect(restored.geography.oceanCurrents).toBe(true);
+
+    // Legacy JSON without `terrains` carrying BiomeId.LAKE
+    const legacy = JSON.parse(json) as Record<string, unknown>;
+    delete legacy.terrains;
+    const migrated = parseMapFromJson(JSON.stringify(legacy));
+    expect(migrated.terrains[hexIndex(7, 7, w)]).toBe(TerrainId.LAKE);
   });
 });

@@ -12,6 +12,7 @@ import {
   WindMode,
 } from '../types/map';
 import { generateNaturalCliffs, syncShallowWater } from './cliffs';
+import { computeCoastalCurrentInfluence, computeOceanCurrents } from './currents';
 import {
   findHexPath,
   getHexBrush,
@@ -41,6 +42,7 @@ export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   windMode: 'latitude',
   moistureScale: 1.0,
   riverThreshold: 20,
+  oceanCurrents: true,
 };
 
 /** Compute latitude in degrees for row r between latNorth (top) and latSouth (bottom). */
@@ -223,16 +225,26 @@ export function generateElevationField(
   return elev;
 }
 
-/** Simulates real-world climate (latitude + lapse rate + wind moisture + rain shadows). */
+/** Simulates real-world climate (latitude + lapse rate + ocean currents + 2D wind moisture + rain shadows). */
 export function simulateClimate(
   elevation: ArrayLike<number>,
   width: number,
   height: number,
-  config: GeographyConfig
+  config: GeographyConfig,
+  terrains?: ArrayLike<number>
 ): { temperature: number[]; moisture: number[] } {
   const total = width * height;
   const temperature = new Array<number>(total);
   const moisture = new Array<number>(total).fill(0);
+
+  const useCurrents = config.oceanCurrents !== false;
+  const currents = useCurrents
+    ? computeOceanCurrents(width, height, elevation, config, terrains)
+    : null;
+  const coastalThermal =
+    useCurrents && currents
+      ? computeCoastalCurrentInfluence(width, height, elevation, currents, terrains)
+      : null;
 
   for (let r = 0; r < height; r++) {
     const latDeg = getRowLatitude(r, height, config);
@@ -242,11 +254,14 @@ export function simulateClimate(
     for (let q = 0; q < width; q++) {
       const idx = hexIndex(q, r, width);
       const e = elevation[idx];
+      const isLake = Boolean(terrains && terrains[idx] === TerrainId.LAKE);
       if (e <= 0) {
-        temperature[idx] = Number(seaLevelTemp.toFixed(1));
+        const curShift = !isLake && currents ? currents.thermal[idx] * 3.6 : 0;
+        temperature[idx] = Number((seaLevelTemp + curShift).toFixed(1));
       } else {
         const altCooling = Math.pow(e, 1.05) * 37;
-        temperature[idx] = Number((seaLevelTemp - altCooling).toFixed(1));
+        const coastShift = coastalThermal ? coastalThermal[idx] * 4.0 : 0;
+        temperature[idx] = Number((seaLevelTemp - altCooling + coastShift).toFixed(1));
       }
     }
   }
@@ -348,7 +363,8 @@ export function simulateClimate(
           break;
         }
       }
-      const m = moisturePass[idx] + (nearWater ? 0.08 : 0);
+      const coastMoistShift = coastalThermal ? coastalThermal[idx] * 0.11 : 0;
+      const m = moisturePass[idx] + (nearWater ? 0.08 : 0) + coastMoistShift;
       moisture[idx] = Number(Math.max(0.02, Math.min(1, m)).toFixed(3));
     }
   }
@@ -598,6 +614,7 @@ export function autoSuggestGoodsForCity(
     (terrainCounts.get(TerrainId.SHALLOW_WATER) ?? 0) +
       (terrainCounts.get(TerrainId.DEEP_OCEAN) ?? 0) >
     0;
+  const nearLake = (terrainCounts.get(TerrainId.LAKE) ?? 0) > 0;
   const mountains =
     (terrainCounts.get(TerrainId.MOUNTAIN) ?? 0) +
     (terrainCounts.get(TerrainId.HIGH_PEAK) ?? 0) +
@@ -619,8 +636,9 @@ export function autoSuggestGoodsForCity(
     (counts.get(BiomeId.TAIGA) ?? 0);
 
   const produced: string[] = [];
-  if (plains >= 4 || nearRiver) produced.push('wheat');
+  if (plains >= 4 || nearRiver || nearLake) produced.push('wheat');
   if (nearWater) produced.push('fish', 'salt');
+  if (nearLake && !nearWater) produced.push('fish');
   if (forests >= 4) produced.push('timber', 'herbs');
   if (mountains >= 4) produced.push('iron', 'marble');
   if (mountains >= 8) produced.push('gold', 'gems');
@@ -775,6 +793,7 @@ export function generateWorld(
       if (
         t === TerrainId.DEEP_OCEAN ||
         t === TerrainId.SHALLOW_WATER ||
+        t === TerrainId.LAKE ||
         t === TerrainId.MOUNTAIN ||
         t === TerrainId.HIGH_PEAK ||
         b === BiomeId.SNOW_ICE
@@ -884,7 +903,7 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
     }
   }
 
-  const { temperature, moisture } = simulateClimate(elev, width, height, geography);
+  const { temperature, moisture } = simulateClimate(elev, width, height, geography, baseTerrains);
   const hydro = generateRiversAuto(
     { width, height, terrains: baseTerrains, biomes, elevation: elev, moisture, geography },
     { useCurrentBiomes: false }
@@ -900,11 +919,17 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
     baseTerrains
   );
 
-  // Preserve water and custom biomes (>=100), while updating climate biomes across all land terrains
+  // Preserve water, lakes, and custom biomes (>=100), while updating climate biomes across all land terrains
   for (let i = 0; i < total; i++) {
     const b = biomes[i];
-    if (b >= 100 || b === BiomeId.DEEP_OCEAN || b === BiomeId.SHALLOW_WATER) {
-      nextBiomes[i] = b;
+    if (
+      b >= 100 ||
+      b === BiomeId.DEEP_OCEAN ||
+      b === BiomeId.SHALLOW_WATER ||
+      b === BiomeId.LAKE ||
+      baseTerrains[i] === TerrainId.LAKE
+    ) {
+      nextBiomes[i] = baseTerrains[i] === TerrainId.LAKE ? BiomeId.LAKE : b;
     }
   }
 

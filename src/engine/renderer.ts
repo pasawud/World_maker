@@ -19,6 +19,12 @@ import {
 } from '../types/map';
 import { getCliffEdges } from './cliffs';
 import {
+  computeOceanCurrents,
+  CurrentStreamline,
+  OceanCurrentField,
+  traceOceanCurrentStreams,
+} from './currents';
+import {
   getHexTerrain,
   getNeighborsWithEdge,
   hexIndex,
@@ -80,6 +86,123 @@ function moistureColor(m: number): string {
   if (cl < 0.28) return mixRgb([186, 132, 68], [216, 194, 114], cl / 0.28);
   if (cl < 0.58) return mixRgb([216, 194, 114], [82, 166, 94], (cl - 0.28) / 0.3);
   return mixRgb([82, 166, 94], [24, 132, 168], (cl - 0.58) / 0.42);
+}
+
+function oceanCurrentFillColor(thermal: number, speed: number): string {
+  if (speed < 0.08) return '#152f4a';
+  if (thermal >= 0.15) {
+    return mixRgb([24, 58, 92], [220, 92, 62], Math.min(1, thermal));
+  }
+  if (thermal <= -0.15) {
+    return mixRgb([22, 54, 92], [56, 189, 248], Math.min(1, -thermal));
+  }
+  return '#1a476e';
+}
+
+function drawLakeDetails(
+  ctx: CanvasRenderingContext2D,
+  map: HexMapData,
+  q: number,
+  r: number,
+  cx: number,
+  cy: number,
+  radius: number
+): void {
+  const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(196, 238, 255, 0.45)';
+  ctx.lineWidth = Math.max(1.0, radius * 0.075);
+  ctx.lineCap = 'round';
+  for (const nb of nbs) {
+    if (!nb.inMap) continue;
+    const nbIdx = hexIndex(nb.q, nb.r, map.width);
+    const nbIsWater = isWaterBiome(map.biomes[nbIdx], map.customBiomes);
+    if (!nbIsWater) {
+      const [x1, y1] = hexVertex(cx, cy, radius - 0.6, nb.edge);
+      const [x2, y2] = hexVertex(cx, cy, radius - 0.6, nb.edge + 1);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+  }
+
+  // Calm freshwater ripple glint
+  ctx.strokeStyle = 'rgba(224, 242, 254, 0.28)';
+  ctx.lineWidth = Math.max(0.8, radius * 0.055);
+  ctx.beginPath();
+  ctx.moveTo(cx - radius * 0.34, cy - radius * 0.12);
+  ctx.lineTo(cx + radius * 0.26, cy - radius * 0.12);
+  ctx.moveTo(cx - radius * 0.2, cy + radius * 0.14);
+  ctx.lineTo(cx + radius * 0.36, cy + radius * 0.14);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawOceanCurrentStreams(
+  ctx: CanvasRenderingContext2D,
+  streams: CurrentStreamline[],
+  hexRadius: number,
+  zoom: number
+): void {
+  if (streams.length === 0) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const st of streams) {
+    if (st.points.length < 2) continue;
+    const pts = st.points.map((pt) => hexToPixel(pt.q, pt.r, hexRadius));
+    const fgColor =
+      st.kind === 'warm'
+        ? '#fb7185'
+        : st.kind === 'cold'
+        ? '#38bdf8'
+        : '#67e8f9';
+
+    const traceCurve = () => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i + 1].x) * 0.5;
+        const my = (pts[i].y + pts[i + 1].y) * 0.5;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      const last = pts[pts.length - 1];
+      ctx.lineTo(last.x, last.y);
+    };
+
+    const baseWidth = Math.max(2.0, Math.min(4.2, 2.4 / Math.max(0.45, zoom * 0.6)));
+    ctx.strokeStyle = 'rgba(8, 15, 26, 0.62)';
+    ctx.lineWidth = baseWidth + 2.2;
+    traceCurve();
+    ctx.stroke();
+
+    ctx.strokeStyle = fgColor;
+    ctx.lineWidth = baseWidth;
+    traceCurve();
+    ctx.stroke();
+
+    // Arrowhead at end of streamline
+    const pPrev = pts[pts.length - 2];
+    const pEnd = pts[pts.length - 1];
+    const angle = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+    const headLen = Math.max(7, baseWidth * 3.1);
+    ctx.fillStyle = fgColor;
+    ctx.beginPath();
+    ctx.moveTo(pEnd.x + Math.cos(angle) * 2, pEnd.y + Math.sin(angle) * 2);
+    ctx.lineTo(
+      pEnd.x - Math.cos(angle - 0.52) * headLen,
+      pEnd.y - Math.sin(angle - 0.52) * headLen
+    );
+    ctx.lineTo(
+      pEnd.x - Math.cos(angle + 0.52) * headLen,
+      pEnd.y - Math.sin(angle + 0.52) * headLen
+    );
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function hexVertex(cx: number, cy: number, radius: number, idx: number): [number, number] {
@@ -667,9 +790,41 @@ export class ChunkedMapRenderer {
   private lastSizeKey = '';
   private lastOverlay: ClimateOverlay = 'none';
   private lastFlagsKey = '';
+  private currentCache: {
+    key: string;
+    field: OceanCurrentField;
+    streams: CurrentStreamline[];
+  } | null = null;
+
+  private getCurrentData(map: HexMapData): {
+    field: OceanCurrentField;
+    streams: CurrentStreamline[];
+  } {
+    const key = `${map.id}_${map.width}x${map.height}_${map.geography.latNorth}_${map.geography.latSouth}_${map.geography.lonWest ?? -180}_${map.geography.lonEast ?? 180}_${map.geography.windMode}_${map.geography.oceanCurrents !== false}`;
+    if (this.currentCache && this.currentCache.key === key) {
+      return this.currentCache;
+    }
+    const field = computeOceanCurrents(
+      map.width,
+      map.height,
+      map.elevation,
+      map.geography,
+      map.terrains
+    );
+    const streams = traceOceanCurrentStreams(
+      map.width,
+      map.height,
+      map.elevation,
+      field,
+      map.terrains
+    );
+    this.currentCache = { key, field, streams };
+    return this.currentCache;
+  }
 
   public invalidateAll(): void {
     this.chunks.clear();
+    this.currentCache = null;
   }
 
   public invalidateHexes(hexes: HexCoord[]): void {
@@ -686,6 +841,7 @@ export class ChunkedMapRenderer {
     for (const key of touched) {
       this.chunks.delete(key);
     }
+    this.currentCache = null;
   }
 
   private getOrBuildChunk(
@@ -719,6 +875,7 @@ export class ChunkedMapRenderer {
     const kingdomColorMap = new Map(map.kingdoms.map((k) => [k.id, k.color]));
     const religionColorMap = new Map(map.religionList.map((r) => [r.id, r.color]));
     const cultureColorMap = new Map((map.cultureList ?? []).map((c) => [c.id, c.color]));
+    const currentField = overlay === 'currents' ? this.getCurrentData(map).field : null;
 
     for (let r = startR; r < endR; r++) {
       for (let q = startQ; q < endQ; q++) {
@@ -741,6 +898,14 @@ export class ChunkedMapRenderer {
           fill = temperatureColor(temp);
         } else if (overlay === 'moisture') {
           fill = moistureColor(map.moisture[idx] ?? 0.5);
+        } else if (overlay === 'currents' && currentField) {
+          if (terrainId === TerrainId.LAKE) {
+            fill = '#3b8ec2';
+          } else if (isWater) {
+            fill = oceanCurrentFillColor(currentField.thermal[idx], currentField.speed[idx]);
+          } else {
+            fill = mixRgb(hexToRgb(terrainMeta.color), [42, 50, 62], 0.45);
+          }
         } else if (overlay === 'terrain') {
           const rgb = hexToRgb(terrainMeta.color);
           const delta = (rnd - 0.5) * 10;
@@ -821,6 +986,8 @@ export class ChunkedMapRenderer {
               ctx.fillStyle = 'rgba(130, 210, 240, 0.14)';
               ctx.fill();
             }
+          } else if (terrainId === TerrainId.LAKE) {
+            drawLakeDetails(ctx, map, q, r, lx, ly, BASE_HEX_RADIUS);
           }
           if (overlay === 'none') {
             if (!isWater && terrainId !== TerrainId.MOUNTAIN && terrainId !== TerrainId.HIGH_PEAK) {
@@ -1046,7 +1213,11 @@ export class ChunkedMapRenderer {
     ctx.lineWidth = Math.max(1.5, 2 / cam.zoom);
     ctx.strokeRect(-BASE_HEX_RADIUS, -BASE_HEX_RADIUS, mapPixelW, mapPixelH);
 
-    drawDynamicLayers(ctx, map, cam.zoom, options);
+    const currentStreams =
+      options.layers.currents || options.overlay === 'currents'
+        ? this.getCurrentData(map).streams
+        : undefined;
+    drawDynamicLayers(ctx, map, cam.zoom, { ...options, currentStreams });
 
     ctx.restore();
   }
@@ -1116,9 +1287,30 @@ function drawDynamicLayers(
     draftPath: HexCoord[];
     previewPath?: { hexes: HexCoord[]; valid: boolean } | null;
     measurePoints: HexCoord[];
+    currentStreams?: CurrentStreamline[];
   }
 ): void {
   const { layers } = options;
+
+  // -1. Ocean current streamlines
+  if (layers.currents || options.overlay === 'currents') {
+    const streams =
+      options.currentStreams ??
+      traceOceanCurrentStreams(
+        map.width,
+        map.height,
+        map.elevation,
+        computeOceanCurrents(
+          map.width,
+          map.height,
+          map.elevation,
+          map.geography,
+          map.terrains
+        ),
+        map.terrains
+      );
+    drawOceanCurrentStreams(ctx, streams, BASE_HEX_RADIUS, zoom);
+  }
 
   // 0. Lat/Lon Graticule lines & labels
   if (
@@ -1685,6 +1877,16 @@ export function exportMapToPng(
   const kingdomColorMap = new Map(map.kingdoms.map((k) => [k.id, k.color]));
   const religionColorMap = new Map(map.religionList.map((r) => [r.id, r.color]));
   const cultureColorMap = new Map((map.cultureList ?? []).map((c) => [c.id, c.color]));
+  const exportCurrents =
+    options.overlay === 'currents' || options.layers.currents
+      ? computeOceanCurrents(
+          map.width,
+          map.height,
+          map.elevation,
+          map.geography,
+          map.terrains
+        )
+      : null;
 
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -1704,6 +1906,12 @@ export function exportMapToPng(
           ? temperatureColor(temp)
           : options.overlay === 'moisture'
           ? moistureColor(map.moisture[idx] ?? 0.5)
+          : options.overlay === 'currents' && exportCurrents
+          ? terrainId === TerrainId.LAKE
+            ? '#3b8ec2'
+            : isWater
+            ? oceanCurrentFillColor(exportCurrents.thermal[idx], exportCurrents.speed[idx])
+            : mixRgb(hexToRgb(terrainMeta.color), [42, 50, 62], 0.45)
           : options.overlay === 'terrain'
           ? terrainMeta.color
           : options.overlay === 'biome'
@@ -1722,6 +1930,7 @@ export function exportMapToPng(
         options.overlay !== 'elevation' &&
         options.overlay !== 'temperature' &&
         options.overlay !== 'moisture' &&
+        options.overlay !== 'currents' &&
         options.overlay !== 'terrain' &&
         options.overlay !== 'biome'
       ) {
@@ -1770,6 +1979,8 @@ export function exportMapToPng(
             ctx.fillStyle = 'rgba(130, 210, 240, 0.14)';
             ctx.fill();
           }
+        } else if (terrainId === TerrainId.LAKE) {
+          drawLakeDetails(ctx, map, q, r, pos.x, pos.y, hexRadius);
         }
       }
       if (options.overlay === 'none') {
@@ -1857,6 +2068,16 @@ export function exportMapToPng(
 
   ctx.save();
   ctx.scale(hexRadius / BASE_HEX_RADIUS, hexRadius / BASE_HEX_RADIUS);
+  const exportStreams =
+    exportCurrents && (options.overlay === 'currents' || options.layers.currents)
+      ? traceOceanCurrentStreams(
+          map.width,
+          map.height,
+          map.elevation,
+          exportCurrents,
+          map.terrains
+        )
+      : undefined;
   drawDynamicLayers(ctx, map, 1, {
     overlay: options.overlay,
     layers: options.layers,
@@ -1867,6 +2088,7 @@ export function exportMapToPng(
     tradeStartCityId: null,
     draftPath: [],
     measurePoints: [],
+    currentStreams: exportStreams,
   });
   ctx.restore();
   ctx.restore();
@@ -1931,6 +2153,8 @@ export function exportMapToPng(
         ? 'ศาสนา & ความเชื่อ'
         : options.overlay === 'culture'
         ? 'วัฒนธรรม & อารยธรรม'
+        : options.overlay === 'currents'
+        ? 'กระแสน้ำมหาสมุทร (Currents)'
         : options.overlay === 'terrain'
         ? 'ภูมิประเทศ (Terrain)'
         : options.overlay === 'biome'
@@ -1941,7 +2165,24 @@ export function exportMapToPng(
     );
     ly += 22;
 
-    if (options.overlay === 'political') {
+    if (options.overlay === 'currents') {
+      const items = [
+        { color: '#f97316', label: 'กระแสน้ำอุ่น (Warm Current)' },
+        { color: '#38bdf8', label: 'กระแสน้ำเย็น (Cold Current)' },
+        { color: '#67e8f9', label: 'กระแสน้ำกลาง (Neutral Drift)' },
+        { color: '#3b8ec2', label: 'ทะเลสาบ (Lake)' },
+      ];
+      for (const item of items) {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(lx, ly - 10, 14, 14);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeRect(lx, ly - 10, 14, 14);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '400 12px Sarabun, sans-serif';
+        ctx.fillText(item.label, lx + 22, ly + 1);
+        ly += 22;
+      }
+    } else if (options.overlay === 'political') {
       for (const k of map.kingdoms) {
         ctx.fillStyle = k.color;
         ctx.fillRect(lx, ly - 10, 14, 14);
