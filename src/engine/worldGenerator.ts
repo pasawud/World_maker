@@ -9,6 +9,7 @@ import {
   RiverPath,
   TerrainId,
   TradeRoute,
+  WindMode,
 } from '../types/map';
 import { generateNaturalCliffs, syncShallowWater } from './cliffs';
 import {
@@ -26,6 +27,7 @@ import {
   generateReligionsFromCities,
   generateTerritoriesFromCities,
 } from './politics';
+import { generateRealEarthElevationField } from './realEarth';
 
 export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   seed: 42081,
@@ -34,6 +36,8 @@ export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   mountainScale: 1.0,
   latNorth: 74,
   latSouth: -12,
+  lonWest: -180,
+  lonEast: 180,
   windMode: 'latitude',
   moistureScale: 1.0,
   riverThreshold: 20,
@@ -45,22 +49,100 @@ export function getRowLatitude(r: number, height: number, config: GeographyConfi
   return config.latNorth + (config.latSouth - config.latNorth) * t;
 }
 
-/** Prevailing wind direction per latitude belt (+1 = West->East, -1 = East->West). */
-export function getPrevailingWindDir(latDeg: number, windMode: GeographyConfig['windMode']): 1 | -1 {
-  if (windMode === 'west') return 1;
-  if (windMode === 'east') return -1;
-  const absLat = Math.abs(latDeg);
-  if (absLat < 30) return -1;
-  if (absLat <= 60) return 1;
-  return -1;
+/** Compute longitude in degrees for column q between lonWest (left) and lonEast (right). */
+export function getColLongitude(q: number, width: number, config: GeographyConfig): number {
+  const lonW = config.lonWest ?? -180;
+  const lonE = config.lonEast ?? 180;
+  const t = width <= 1 ? 0.5 : q / (width - 1);
+  return lonW + (lonE - lonW) * t;
 }
 
-/** Generate tectonic elevation (-1..1) for the chosen landmass preset. */
+export function formatLatitude(lat: number): string {
+  if (Math.abs(lat) < 0.05) return '0°';
+  return `${Math.abs(lat).toFixed(1).replace(/\.0$/, '')}°${lat >= 0 ? 'N' : 'S'}`;
+}
+
+export function formatLongitude(lon: number): string {
+  if (Math.abs(lon) < 0.05) return '0°';
+  return `${Math.abs(lon).toFixed(1).replace(/\.0$/, '')}°${lon >= 0 ? 'E' : 'W'}`;
+}
+
+export function formatSeaLevelMeters(seaLevel: number): string {
+  const meters = Math.round(seaLevel * 800);
+  if (meters === 0) return '0 ม. (ระดับปัจจุบัน)';
+  return `${meters > 0 ? '+' : ''}${meters.toLocaleString()} ม.`;
+}
+
+/** Prevailing 2D wind unit vector (+dx = W->E, +dy = N->S in screen coordinates). */
+export function getPrevailingWindVector(
+  latDeg: number,
+  lonDeg: number,
+  windMode: WindMode
+): { dx: number; dy: number } {
+  switch (windMode) {
+    case 'west':
+      return { dx: 1, dy: 0 };
+    case 'east':
+      return { dx: -1, dy: 0 };
+    case 'north':
+      return { dx: 0, dy: 1 };
+    case 'south':
+      return { dx: 0, dy: -1 };
+    case 'northwest':
+      return { dx: 0.7071, dy: 0.7071 };
+    case 'southwest':
+      return { dx: 0.7071, dy: -0.7071 };
+    case 'northeast':
+      return { dx: -0.7071, dy: 0.7071 };
+    case 'southeast':
+      return { dx: -0.7071, dy: -0.7071 };
+    case 'monsoon': {
+      // South / SE / East Asia SW summer monsoon
+      if (latDeg >= 0 && latDeg <= 34 && lonDeg >= 55 && lonDeg <= 145) {
+        return { dx: 0.72, dy: -0.69 };
+      }
+      // West African monsoon
+      if (latDeg >= 0 && latDeg <= 18 && lonDeg >= -18 && lonDeg <= 20) {
+        return { dx: 0.55, dy: -0.83 };
+      }
+      // North Australian monsoon
+      if (latDeg >= -24 && latDeg < 0 && lonDeg >= 110 && lonDeg <= 155) {
+        return { dx: 0.6, dy: 0.8 };
+      }
+      // Fallback to realistic Coriolis belts
+      return getPrevailingWindVector(latDeg, lonDeg, 'latitude');
+    }
+    case 'latitude':
+    default: {
+      const absLat = Math.abs(latDeg);
+      if (absLat < 30) {
+        // Trade Winds blow from E toward equator (NE in N-hemisphere, SE in S-hemisphere)
+        return { dx: -0.88, dy: latDeg >= 0 ? 0.47 : -0.47 };
+      }
+      if (absLat <= 60) {
+        // Westerlies blow from W toward poles (SW in N-hemisphere, NW in S-hemisphere)
+        return { dx: 0.88, dy: latDeg >= 0 ? -0.47 : 0.47 };
+      }
+      // Polar Easterlies blow from E toward equator
+      return { dx: -0.85, dy: latDeg >= 0 ? 0.52 : -0.52 };
+    }
+  }
+}
+
+/** Prevailing zonal wind direction per latitude belt (+1 = West->East, -1 = East->West). */
+export function getPrevailingWindDir(latDeg: number, windMode: WindMode): 1 | -1 {
+  return getPrevailingWindVector(latDeg, 0, windMode).dx >= 0 ? 1 : -1;
+}
+
+/** Generate tectonic elevation (-1..1) for the chosen landmass preset (or Real Earth). */
 export function generateElevationField(
   width: number,
   height: number,
   config: GeographyConfig
 ): number[] {
+  if (config.landmassType === 'real_earth') {
+    return generateRealEarthElevationField(width, height, config);
+  }
   const nMain = createNoise2D(config.seed);
   const nWarp = createNoise2D(config.seed + 1013);
   const nRidge = createNoise2D(config.seed + 3037);
@@ -169,59 +251,84 @@ export function simulateClimate(
     }
   }
 
+  const vaporArr = new Float64Array(total).fill(0.65 * config.moistureScale);
   const moisturePass = new Float64Array(total);
-  const passes = 2;
+  const sweeps: readonly [1 | -1, 1 | -1][] = [
+    [1, 1],
+    [-1, -1],
+    [1, -1],
+    [-1, 1],
+    [1, 1],
+    [-1, -1],
+  ];
 
-  for (let pass = 0; pass < passes; pass++) {
-    for (let r = 0; r < height; r++) {
+  for (let pass = 0; pass < sweeps.length; pass++) {
+    const [qStep, rStep] = sweeps[pass];
+    const startR = rStep === 1 ? 0 : height - 1;
+    const endR = rStep === 1 ? height : -1;
+    const startQ = qStep === 1 ? 0 : width - 1;
+    const endQ = qStep === 1 ? width : -1;
+
+    for (let r = startR; r !== endR; r += rStep) {
       const latDeg = getRowLatitude(r, height, config);
-      const dir = getPrevailingWindDir(latDeg, config.windMode);
-      const startQ = dir === 1 ? 0 : width - 1;
-      const endQ = dir === 1 ? width : -1;
-
       const absLat = Math.abs(latDeg);
       const subtropicalDry = Math.exp(-Math.pow((absLat - 27) / 9, 2)) * 0.045;
       const itczBoost = Math.exp(-Math.pow(absLat / 12, 2)) * 0.05;
 
-      let vapor = 0.65 * config.moistureScale;
-      let prevElev = 0;
-
-      for (let q = startQ; q !== endQ; q += dir) {
+      for (let q = startQ; q !== endQ; q += qStep) {
         const idx = hexIndex(q, r, width);
         const e = elevation[idx];
+        const lonDeg = getColLongitude(q, width, config);
+        const { dx, dy } = getPrevailingWindVector(latDeg, lonDeg, config.windMode);
 
-        if (pass === 1) {
-          const rUp = Math.max(0, r - 1);
-          const rDn = Math.min(height - 1, r + 1);
-          const avgNb =
-            (moisturePass[hexIndex(q, rUp, width)] + moisturePass[hexIndex(q, rDn, width)]) * 0.5;
-          vapor = vapor * 0.85 + avgNb * 0.15;
-        }
+        const wx = Math.abs(dx);
+        const wy = Math.abs(dy);
+        const wSum = wx + wy || 1;
+        const stepBackQ = dx >= 0 ? -1 : 1;
+        const stepBackR = dy >= 0 ? -1 : 1;
+
+        const uq = q + stepBackQ;
+        const ur = r + stepBackR;
+        const maritimeVapor = 0.65 * config.moistureScale;
+
+        const vaporX = uq >= 0 && uq < width ? vaporArr[hexIndex(uq, r, width)] : maritimeVapor;
+        const elevX =
+          uq >= 0 && uq < width ? Math.max(0, elevation[hexIndex(uq, r, width)]) : 0;
+
+        const vaporY = ur >= 0 && ur < height ? vaporArr[hexIndex(q, ur, width)] : maritimeVapor;
+        const elevY =
+          ur >= 0 && ur < height ? Math.max(0, elevation[hexIndex(q, ur, width)]) : 0;
+
+        const upwindVapor = (vaporX * wx + vaporY * wy) / wSum;
+        const prevElev = (elevX * wx + elevY * wy) / wSum;
 
         if (e <= 0) {
           const tempWarmth = Math.max(0.25, Math.min(1.15, (temperature[idx] + 15) / 45));
-          vapor = Math.min(1.15, vapor + 0.16 * tempWarmth * config.moistureScale);
-          moisturePass[idx] = Math.min(1, vapor);
-          prevElev = 0;
+          const nextVapor = Math.min(
+            1.15,
+            upwindVapor + 0.16 * tempWarmth * config.moistureScale
+          );
+          vaporArr[idx] = nextVapor;
+          moisturePass[idx] = Math.min(1, nextVapor);
         } else {
           const slopeUp = Math.max(0, e - prevElev);
-          const orographicRain = slopeUp * 2.2 * vapor;
-          const basePrecip = (0.045 + itczBoost) * vapor * config.moistureScale;
-          const totalRain = Math.min(vapor, basePrecip + orographicRain);
+          const orographicRain = slopeUp * 2.2 * upwindVapor;
+          const basePrecip = (0.045 + itczBoost) * upwindVapor * config.moistureScale;
+          const totalRain = Math.min(upwindVapor, basePrecip + orographicRain);
 
           const localMoisture = Math.max(
             0.02,
-            Math.min(1, totalRain * 2.5 + vapor * 0.48 - subtropicalDry * 2.2)
+            Math.min(1, totalRain * 2.5 + upwindVapor * 0.48 - subtropicalDry * 2.2)
           );
 
-          moisturePass[idx] = pass === 0 ? localMoisture : (moisturePass[idx] + localMoisture) * 0.5;
+          moisturePass[idx] =
+            pass === 0 ? localMoisture : moisturePass[idx] * 0.35 + localMoisture * 0.65;
 
           const mountainBarrierLoss = e > 0.45 ? (e - 0.4) * 0.65 : 0;
-          vapor = Math.max(
+          vaporArr[idx] = Math.max(
             0.03,
-            vapor - totalRain * 0.78 - mountainBarrierLoss - subtropicalDry
+            upwindVapor - totalRain * 0.78 - mountainBarrierLoss - subtropicalDry
           );
-          prevElev = e;
         }
       }
     }

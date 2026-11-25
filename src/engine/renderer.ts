@@ -26,7 +26,13 @@ import {
   isWaterBiome,
   SQRT3,
 } from './hexMath';
-import { getPrevailingWindDir, getRowLatitude } from './worldGenerator';
+import {
+  formatLatitude,
+  formatLongitude,
+  getColLongitude,
+  getPrevailingWindVector,
+  getRowLatitude,
+} from './worldGenerator';
 
 export const BASE_HEX_RADIUS = 18;
 export const CHUNK_SIZE = 16;
@@ -1114,28 +1120,139 @@ function drawDynamicLayers(
 ): void {
   const { layers } = options;
 
-  // 1. Prevailing wind arrows on climate overlays
-  if (options.overlay === 'moisture' || options.overlay === 'temperature') {
-    const stepR = Math.max(8, Math.floor(map.height / 7));
-    const stepQ = Math.max(12, Math.floor(map.width / 8));
+  // 0. Lat/Lon Graticule lines & labels
+  if (
+    layers.graticule ||
+    options.overlay === 'temperature' ||
+    options.overlay === 'moisture'
+  ) {
+    const mapPixelW = map.width * SQRT3 * BASE_HEX_RADIUS;
+    const mapPixelH = Math.max(1, map.height - 1) * 1.5 * BASE_HEX_RADIUS;
+    const { latNorth, latSouth } = map.geography;
+    const lonWest = map.geography.lonWest ?? -180;
+    const lonEast = map.geography.lonEast ?? 180;
+    const latSpan = Math.abs(latNorth - latSouth);
+    const lonSpan = Math.abs(lonEast - lonWest);
+    const latStep = latSpan > 90 ? 30 : latSpan > 40 ? 15 : 10;
+    const lonStep = lonSpan > 180 ? 60 : lonSpan > 80 ? 30 : 15;
+
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    const labelFont = Math.max(10, Math.round(11 / Math.max(0.4, zoom * 0.85)));
+    ctx.font = `600 ${labelFont}px Sarabun, sans-serif`;
+
+    // Regular latitude parallels
+    const drawLatLine = (
+      deg: number,
+      stroke: string,
+      dash: number[],
+      lineWidth: number,
+      tag?: string
+    ) => {
+      if (Math.abs(latNorth - latSouth) < 0.01) return;
+      const t = (deg - latNorth) / (latSouth - latNorth);
+      if (t < 0 || t > 1) return;
+      const py = t * mapPixelH;
+      ctx.save();
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lineWidth;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(0, py);
+      ctx.lineTo(mapPixelW, py);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = stroke;
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+      ctx.shadowBlur = 4;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(tag ?? formatLatitude(deg), 8, py - 3);
+      ctx.restore();
+    };
+
+    const minLat = Math.min(latNorth, latSouth);
+    const maxLat = Math.max(latNorth, latSouth);
+    const startLat = Math.ceil(minLat / latStep) * latStep;
+    for (let deg = startLat; deg <= maxLat; deg += latStep) {
+      if (Math.abs(deg) < 0.1) continue;
+      drawLatLine(deg, 'rgba(148, 163, 184, 0.32)', [4, 4], Math.max(0.8, 1 / zoom));
+    }
+
+    // Special Earth parallels: Equator, Tropics (±23.5°), Polar Circles (±66.5°)
+    drawLatLine(0, 'rgba(56, 189, 248, 0.72)', [], Math.max(1.2, 1.5 / zoom), '0° เส้นศูนย์สูตร');
+    drawLatLine(23.5, 'rgba(251, 191, 36, 0.48)', [6, 5], Math.max(0.9, 1.1 / zoom), '23.5°N (Tropic)');
+    drawLatLine(-23.5, 'rgba(251, 191, 36, 0.48)', [6, 5], Math.max(0.9, 1.1 / zoom), '23.5°S (Tropic)');
+    drawLatLine(66.5, 'rgba(186, 230, 253, 0.48)', [2, 4], Math.max(0.9, 1.1 / zoom), '66.5°N (Arctic)');
+    drawLatLine(-66.5, 'rgba(186, 230, 253, 0.48)', [2, 4], Math.max(0.9, 1.1 / zoom), '66.5°S (Antarctic)');
+
+    // Meridians (Longitude)
+    const minLon = Math.min(lonWest, lonEast);
+    const maxLon = Math.max(lonWest, lonEast);
+    const startLon = Math.ceil(minLon / lonStep) * lonStep;
+    for (let deg = startLon; deg <= maxLon; deg += lonStep) {
+      if (Math.abs(lonEast - lonWest) < 0.01) break;
+      const t = (deg - lonWest) / (lonEast - lonWest);
+      if (t < 0 || t > 1) continue;
+      const px = t * mapPixelW;
+      const isPrime = Math.abs(deg) < 0.1;
+      ctx.save();
+      ctx.strokeStyle = isPrime ? 'rgba(251, 191, 36, 0.55)' : 'rgba(148, 163, 184, 0.28)';
+      ctx.lineWidth = isPrime ? Math.max(1.1, 1.4 / zoom) : Math.max(0.8, 1 / zoom);
+      ctx.setLineDash(isPrime ? [6, 4] : [4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, mapPixelH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = isPrime ? 'rgba(251, 191, 36, 0.85)' : 'rgba(203, 213, 225, 0.72)';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+      ctx.shadowBlur = 4;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(isPrime ? '0° (Prime)' : formatLongitude(deg), px, 8);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // 1. Prevailing 2D wind arrows on climate overlays
+  if (options.overlay === 'moisture' || options.overlay === 'temperature') {
+    const stepR = Math.max(7, Math.floor(map.height / 7));
+    const stepQ = Math.max(10, Math.floor(map.width / 8));
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.62)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
     ctx.lineWidth = Math.max(1.2, 1.8 / zoom);
+    ctx.lineCap = 'round';
     for (let r = Math.floor(stepR / 2); r < map.height; r += stepR) {
       const lat = getRowLatitude(r, map.height, map.geography);
-      const dir = getPrevailingWindDir(lat, map.geography.windMode);
       for (let q = Math.floor(stepQ / 2); q < map.width; q += stepQ) {
+        const lon = getColLongitude(q, map.width, map.geography);
+        const { dx, dy } = getPrevailingWindVector(lat, lon, map.geography.windMode);
+        const angle = Math.atan2(dy, dx);
         const p = hexToPixel(q, r, BASE_HEX_RADIUS);
-        const len = BASE_HEX_RADIUS * 1.6 * dir;
+        const halfLen = BASE_HEX_RADIUS * 0.85;
+        const tipX = p.x + Math.cos(angle) * halfLen;
+        const tipY = p.y + Math.sin(angle) * halfLen;
+        const tailX = p.x - Math.cos(angle) * halfLen;
+        const tailY = p.y - Math.sin(angle) * halfLen;
+
         ctx.beginPath();
-        ctx.moveTo(p.x - len * 0.5, p.y);
-        ctx.lineTo(p.x + len * 0.5, p.y);
+        ctx.moveTo(tailX, tailY);
+        ctx.lineTo(tipX, tipY);
         ctx.stroke();
+
+        const headLen = BASE_HEX_RADIUS * 0.42;
         ctx.beginPath();
-        ctx.moveTo(p.x + len * 0.5, p.y);
-        ctx.lineTo(p.x + len * 0.25, p.y - BASE_HEX_RADIUS * 0.3);
-        ctx.lineTo(p.x + len * 0.25, p.y + BASE_HEX_RADIUS * 0.3);
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(
+          tipX - Math.cos(angle - 0.55) * headLen,
+          tipY - Math.sin(angle - 0.55) * headLen
+        );
+        ctx.lineTo(
+          tipX - Math.cos(angle + 0.55) * headLen,
+          tipY - Math.sin(angle + 0.55) * headLen
+        );
         ctx.closePath();
         ctx.fill();
       }

@@ -242,6 +242,8 @@ export function parseMapFromJson(raw: string): HexMapData {
       mountainScale: Number(geoRaw.mountainScale) || 1,
       latNorth: Number.isFinite(Number(geoRaw.latNorth)) ? Number(geoRaw.latNorth) : 74,
       latSouth: Number.isFinite(Number(geoRaw.latSouth)) ? Number(geoRaw.latSouth) : -12,
+      lonWest: Number.isFinite(Number(geoRaw.lonWest)) ? Number(geoRaw.lonWest) : -180,
+      lonEast: Number.isFinite(Number(geoRaw.lonEast)) ? Number(geoRaw.lonEast) : 180,
       moistureScale: Number(geoRaw.moistureScale) || 1,
       riverThreshold: Number(geoRaw.riverThreshold) || 20,
     },

@@ -105,6 +105,7 @@ export function useMapEditor() {
 
   const [layers, setLayers] = useState<LayerVisibility>({
     grid: false,
+    graticule: false,
     cityNames: true,
     labels: true,
     territories: true,

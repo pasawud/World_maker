@@ -153,6 +153,7 @@ export interface Culture {
 }
 
 export type LandmassType =
+  | 'real_earth'
   | 'continent'
   | 'twin'
   | 'archipelago'
@@ -160,7 +161,17 @@ export type LandmassType =
   | 'inland_sea'
   | 'coastal';
 
-export type WindMode = 'latitude' | 'west' | 'east';
+export type WindMode =
+  | 'latitude'
+  | 'monsoon'
+  | 'west'
+  | 'east'
+  | 'north'
+  | 'south'
+  | 'northwest'
+  | 'southwest'
+  | 'northeast'
+  | 'southeast';
 
 export interface GeographyConfig {
   seed: number;
@@ -169,6 +180,8 @@ export interface GeographyConfig {
   mountainScale: number;
   latNorth: number;
   latSouth: number;
+  lonWest?: number;
+  lonEast?: number;
   windMode: WindMode;
   moistureScale: number;
   riverThreshold: number;
@@ -505,6 +518,7 @@ export type ClimateOverlay =
 
 export interface LayerVisibility {
   grid: boolean;
+  graticule?: boolean;
   cityNames: boolean;
   labels: boolean;
   territories: boolean;

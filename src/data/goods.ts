@@ -14,6 +14,7 @@ import {
   TimelineEventCategory,
   TradeGood,
   TravelSpeedId,
+  WindMode,
 } from '../types/map';
 
 export const DEFAULT_GOODS: TradeGood[] = [
@@ -479,12 +480,104 @@ export const SCALE_PRESETS: ScalePreset[] = [
 ];
 
 export const LANDMASS_PRESETS: { id: LandmassType; label: string; desc: string }[] = [
+  {
+    id: 'real_earth',
+    label: 'แผนที่โลกจริง (Real Earth)',
+    desc: 'ทวีป หมู่เกาะ และเทือกเขาตามโลกจริง อิงละติจูด-ลองจิจูด',
+  },
   { id: 'continent', label: 'ทวีปเดี่ยว', desc: 'แผ่นดินใหญ่ตรงกลาง ล้อมรอบด้วยมหาสมุทร' },
   { id: 'twin', label: 'สองทวีป', desc: 'ทวีปตะวันตก-ตะวันออก คั่นด้วยช่องแคบ' },
   { id: 'archipelago', label: 'หมู่เกาะ', desc: 'เกาะใหญ่น้อยกระจายตัว เหมาะกับการเดินเรือ' },
   { id: 'pangaea', label: 'มหาทวีป (Pangaea)', desc: 'แผ่นดินกว้างใหญ่ต่อเนื่อง มียอดเขาแกนกลาง' },
   { id: 'inland_sea', label: 'ทะเลในทวีป', desc: 'แผ่นดินโอบล้อมทะเลปิดตรงกลาง' },
   { id: 'coastal', label: 'ชายฝั่งตะวันตก', desc: 'แผ่นดินใหญ่ฝั่งตะวันออก ทะเลกว้างฝั่งตะวันตก' },
+];
+
+export const WIND_MODE_OPTIONS: { id: WindMode; label: string; short: string }[] = [
+  { id: 'latitude', label: 'ตามแถบละติจูดโลกจริง (Trade Winds & Westerlies)', short: '🌍 โลกจริง' },
+  { id: 'monsoon', label: 'ลมมรสุมโลกจริง (Monsoon & ITCZ)', short: '🌧️ มรสุม' },
+  { id: 'west', label: 'ลมตะวันตก → ตะวันออก (W → E)', short: 'W→E' },
+  { id: 'east', label: 'ลมตะวันออก → ตะวันตก (E → W)', short: 'E→W' },
+  { id: 'north', label: 'ลมเหนือ → ใต้ (N → S)', short: 'N→S' },
+  { id: 'south', label: 'ลมใต้ → เหนือ (S → N)', short: 'S→N' },
+  { id: 'northwest', label: 'ลมตะวันตกเฉียงเหนือ (NW → SE)', short: 'NW' },
+  { id: 'southwest', label: 'ลมตะวันตกเฉียงใต้ (SW → NE)', short: 'SW' },
+  { id: 'northeast', label: 'ลมตะวันออกเฉียงเหนือ (NE → SW)', short: 'NE' },
+  { id: 'southeast', label: 'ลมตะวันออกเฉียงใต้ (SE → NW)', short: 'SE' },
+];
+
+export interface EarthRegionPreset {
+  id: string;
+  label: string;
+  latNorth: number;
+  latSouth: number;
+  lonWest: number;
+  lonEast: number;
+  seaLevel: number;
+  windMode: WindMode;
+}
+
+export const EARTH_REGION_PRESETS: EarthRegionPreset[] = [
+  {
+    id: 'earth_full',
+    label: 'โลกทั้งใบ (เหมือนโลกจริง)',
+    latNorth: 85,
+    latSouth: -85,
+    lonWest: -180,
+    lonEast: 180,
+    seaLevel: 0,
+    windMode: 'latitude',
+  },
+  {
+    id: 'earth_habitable',
+    label: 'โลก 7 ทวีป (80°N–58°S)',
+    latNorth: 80,
+    latSouth: -58,
+    lonWest: -180,
+    lonEast: 180,
+    seaLevel: 0,
+    windMode: 'monsoon',
+  },
+  {
+    id: 'sea_thailand',
+    label: 'เอเชียตะวันออกเฉียงใต้ / ไทย',
+    latNorth: 28,
+    latSouth: -12,
+    lonWest: 90,
+    lonEast: 142,
+    seaLevel: 0,
+    windMode: 'monsoon',
+  },
+  {
+    id: 'europe_med',
+    label: 'ยุโรป & เมดิเตอร์เรเนียน',
+    latNorth: 72,
+    latSouth: 30,
+    lonWest: -15,
+    lonEast: 48,
+    seaLevel: 0,
+    windMode: 'latitude',
+  },
+  {
+    id: 'east_asia',
+    label: 'เอเชียตะวันออก & หิมาลัย',
+    latNorth: 55,
+    latSouth: 15,
+    lonWest: 72,
+    lonEast: 148,
+    seaLevel: 0,
+    windMode: 'monsoon',
+  },
+  {
+    id: 'americas',
+    label: 'ทวีปอเมริกาเหนือ-ใต้',
+    latNorth: 76,
+    latSouth: -58,
+    lonWest: -168,
+    lonEast: -32,
+    seaLevel: 0,
+    windMode: 'latitude',
+  },
 ];
 
 export const TRAVEL_SPEEDS: { id: TravelSpeedId; label: string; kmPerDay: number; icon: string }[] = [

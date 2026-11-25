@@ -65,6 +65,7 @@ export const SubBar: React.FC<SubBarProps> = ({
     { key: 'routes', label: 'เส้นทาง' },
     { key: 'rivers', label: 'แม่น้ำ' },
     { key: 'pois', label: 'จุดสำคัญ' },
+    { key: 'graticule', label: 'พิกัดโลก' },
   ];
 
   return (

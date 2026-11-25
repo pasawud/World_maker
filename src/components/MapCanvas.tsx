@@ -30,6 +30,12 @@ import {
 } from '../engine/hexMath';
 import { BASE_HEX_RADIUS, ChunkedMapRenderer } from '../engine/renderer';
 import {
+  formatLatitude,
+  formatLongitude,
+  getColLongitude,
+  getRowLatitude,
+} from '../engine/worldGenerator';
+import {
   ClimateOverlay,
   HexCoord,
   HexMapData,
@@ -697,8 +703,24 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const elevM = Math.round((map.elevation[idx] ?? 0) * 5200);
     const temp = map.temperature[idx] ?? 15;
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
+    const latStr = formatLatitude(getRowLatitude(hoverHex.r, map.height, map.geography));
+    const lonStr = formatLongitude(getColLongitude(hoverHex.q, map.width, map.geography));
     const city = map.cities.find((c) => c.q === hoverHex.q && c.r === hoverHex.r);
-    return { terrain, biome, feat, kingdom, govLabel, religion, culture, elevM, temp, moist, city };
+    return {
+      terrain,
+      biome,
+      feat,
+      kingdom,
+      govLabel,
+      religion,
+      culture,
+      elevM,
+      temp,
+      moist,
+      latStr,
+      lonStr,
+      city,
+    };
   }, [hoverHex, map]);
 
   const activeTerrainMeta = getTerrainMeta(activeTerrain);
@@ -1090,7 +1112,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       {hoverHex && hoverInfo && (
         <div className="hidden md:flex absolute bottom-3 left-1/2 -translate-x-1/2 items-center gap-2.5 bg-[#111720]/92 border border-slate-700/75 rounded-full px-4 py-1 text-[11px] text-slate-200 pointer-events-none shadow-lg whitespace-nowrap max-w-[75vw] overflow-hidden">
           <span className="text-slate-400">
-            ({hoverHex.q}, {hoverHex.r})
+            ({hoverHex.q}, {hoverHex.r}) · {hoverInfo.latStr}, {hoverInfo.lonStr}
           </span>
           <span className="flex items-center gap-1 font-medium text-amber-200">
             <span

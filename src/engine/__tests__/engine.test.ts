@@ -42,6 +42,9 @@ import {
   autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
+  getColLongitude,
+  getPrevailingWindVector,
+  getRowLatitude,
   recomputeBiomesFromCurrentMap,
   simulateClimate,
 } from '../worldGenerator';
@@ -984,5 +987,148 @@ describe('Separated Terrain & Biome System', () => {
     const resized = resizeMap(restored, 45, 35, 25, 'preserve');
     expect(resized.terrains).toHaveLength(45 * 35);
     expect(resized.terrains[hexIndex(10, 10, 45)]).toBe(restored.terrains[hexIndex(10, 10, 40)]);
+  });
+});
+
+describe('Real Earth, Lat/Lon, Sea Level & 2D Wind System', () => {
+  it('generates Real Earth continents, Himalayas mountains, and open Pacific Ocean', () => {
+    const cfg = {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      landmassType: 'real_earth' as const,
+      latNorth: 85,
+      latSouth: -85,
+      lonWest: -180,
+      lonEast: 180,
+      seaLevel: 0,
+      windMode: 'latitude' as const,
+    };
+    const w = 120;
+    const h = 68;
+    const map = generateWorld(w, h, 300, cfg, 'Earth');
+
+    const findHexForCoord = (targetLat: number, targetLon: number) => {
+      const r = Math.max(
+        0,
+        Math.min(
+          h - 1,
+          Math.round(((targetLat - cfg.latNorth) / (cfg.latSouth - cfg.latNorth)) * (h - 1))
+        )
+      );
+      const q = Math.max(
+        0,
+        Math.min(
+          w - 1,
+          Math.round(((targetLon - cfg.lonWest) / (cfg.lonEast - cfg.lonWest)) * (w - 1))
+        )
+      );
+      return hexIndex(q, r, w);
+    };
+
+    // Sahara / Central Africa -> Land
+    expect(isWaterBiome(map.biomes[findHexForCoord(20, 15)])).toBe(false);
+    // Central US -> Land
+    expect(isWaterBiome(map.biomes[findHexForCoord(40, -95)])).toBe(false);
+    // Central Australia -> Land
+    expect(isWaterBiome(map.biomes[findHexForCoord(-25, 134)])).toBe(false);
+    // Himalayas -> Elevated Mountain/Highland/High Peak
+    const himalayasIdx = findHexForCoord(29, 86);
+    expect(isWaterBiome(map.biomes[himalayasIdx])).toBe(false);
+    expect(map.elevation[himalayasIdx]).toBeGreaterThan(0.4);
+    // Central Pacific -> Ocean
+    expect(isWaterBiome(map.biomes[findHexForCoord(0, -150)])).toBe(true);
+  });
+
+  it('supports regional lat/lon cropping and realistic sea-level land flooding/exposure', () => {
+    const baseCfg = {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      landmassType: 'real_earth' as const,
+      latNorth: 28,
+      latSouth: -12,
+      lonWest: 90,
+      lonEast: 142,
+      windMode: 'monsoon' as const,
+    };
+    const countLand = (seaLevel: number) => {
+      const m = generateWorld(60, 40, 80, { ...baseCfg, seaLevel });
+      return m.biomes.filter((b) => !isWaterBiome(b)).length;
+    };
+
+    const iceAgeLand = countLand(-0.15);
+    const presentLand = countLand(0);
+    const floodedLand = countLand(0.15);
+
+    expect(presentLand).toBeGreaterThan(50);
+    expect(iceAgeLand).toBeGreaterThan(presentLand);
+    expect(presentLand).toBeGreaterThan(floodedLand);
+  });
+
+  it('simulates 2D wind vectors (N/S/Monsoon/Earth) and north/south orographic rain shadows', () => {
+    const w = 14;
+    const h = 34;
+    const elev = new Array<number>(w * h).fill(0.14);
+    // East-West mountain range across rows 15..17, ocean along south rows 26..33
+    for (let q = 0; q < w; q++) {
+      for (let r = 26; r < h; r++) elev[hexIndex(q, r, w)] = -0.45;
+      for (let r = 15; r <= 17; r++) elev[hexIndex(q, r, w)] = 0.78;
+    }
+
+    const southWind = simulateClimate(elev, w, h, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      windMode: 'south',
+      latNorth: 40,
+      latSouth: 20,
+    });
+    // Wind blowing S->N makes south slope (r=18) wetter than northern leeward shadow (r=12)
+    expect(southWind.moisture[hexIndex(7, 18, w)]).toBeGreaterThan(
+      southWind.moisture[hexIndex(7, 12, w)] + 0.1
+    );
+
+    // Reverse: ocean on north (r=0..7) and wind blowing N->S ('north')
+    const elevN = new Array<number>(w * h).fill(0.14);
+    for (let q = 0; q < w; q++) {
+      for (let r = 0; r <= 7; r++) elevN[hexIndex(q, r, w)] = -0.45;
+      for (let r = 15; r <= 17; r++) elevN[hexIndex(q, r, w)] = 0.78;
+    }
+    const northWind = simulateClimate(elevN, w, h, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      windMode: 'north',
+      latNorth: 40,
+      latSouth: 20,
+    });
+    expect(northWind.moisture[hexIndex(7, 14, w)]).toBeGreaterThan(
+      northWind.moisture[hexIndex(7, 20, w)] + 0.1
+    );
+
+    // Check Coriolis Earth wind directions & Monsoon override
+    expect(getPrevailingWindVector(15, 0, 'latitude').dx).toBeLessThan(0); // Trade wind E->W
+    expect(getPrevailingWindVector(45, 0, 'latitude').dx).toBeGreaterThan(0); // Westerly W->E
+    expect(getPrevailingWindVector(15, 100, 'monsoon').dx).toBeGreaterThan(0); // SE Asia monsoon
+    expect(getColLongitude(0, 10, DEFAULT_GEOGRAPHY_CONFIG)).toBe(-180);
+    expect(getRowLatitude(0, 10, DEFAULT_GEOGRAPHY_CONFIG)).toBe(74);
+  });
+
+  it('round-trips lonWest, lonEast, real_earth, and 2D windMode in serialization', () => {
+    const map = generateWorld(30, 20, 100, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      landmassType: 'real_earth',
+      latNorth: 55,
+      latSouth: 15,
+      lonWest: 72,
+      lonEast: 148,
+      windMode: 'southwest',
+    });
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+    expect(restored.geography.landmassType).toBe('real_earth');
+    expect(restored.geography.lonWest).toBe(72);
+    expect(restored.geography.lonEast).toBe(148);
+    expect(restored.geography.windMode).toBe('southwest');
+
+    const legacy = JSON.parse(json) as { geography: Record<string, unknown> };
+    delete legacy.geography.lonWest;
+    delete legacy.geography.lonEast;
+    const migrated = parseMapFromJson(JSON.stringify(legacy));
+    expect(migrated.geography.lonWest).toBe(-180);
+    expect(migrated.geography.lonEast).toBe(180);
   });
 });

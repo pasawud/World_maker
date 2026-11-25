@@ -1,6 +1,24 @@
-import React, { useState } from 'react';
-import { CloudRain, Compass, Mountain, RefreshCw, Sparkles, Waves, Wind } from 'lucide-react';
-import { LANDMASS_PRESETS } from '../data/goods';
+import React, { useEffect, useState } from 'react';
+import {
+  CloudRain,
+  Compass,
+  Globe,
+  Mountain,
+  RefreshCw,
+  Sparkles,
+  Waves,
+  Wind,
+} from 'lucide-react';
+import {
+  EARTH_REGION_PRESETS,
+  LANDMASS_PRESETS,
+  WIND_MODE_OPTIONS,
+} from '../data/goods';
+import {
+  formatLatitude,
+  formatLongitude,
+  formatSeaLevelMeters,
+} from '../engine/worldGenerator';
 import { ClimateOverlay, GeographyConfig, LandmassType, WindMode } from '../types/map';
 
 interface ClimateGeneratorPanelProps {
@@ -20,7 +38,22 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
   onAutoRivers,
   onRecomputeBiomes,
 }) => {
-  const [draft, setDraft] = useState<GeographyConfig>(config);
+  const [draft, setDraft] = useState<GeographyConfig>(() => ({
+    ...config,
+    lonWest: config.lonWest ?? -180,
+    lonEast: config.lonEast ?? 180,
+  }));
+
+  useEffect(() => {
+    setDraft({
+      ...config,
+      lonWest: config.lonWest ?? -180,
+      lonEast: config.lonEast ?? 180,
+    });
+  }, [config]);
+
+  const lonWest = draft.lonWest ?? -180;
+  const lonEast = draft.lonEast ?? 180;
 
   const randomizeSeed = () => {
     const seed = Math.floor(10000 + Math.random() * 89999);
@@ -29,13 +62,53 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
     onGenerateWorld(next);
   };
 
+  const applyRealEarthDefaults = () => {
+    const next: GeographyConfig = {
+      ...draft,
+      landmassType: 'real_earth',
+      latNorth: 85,
+      latSouth: -85,
+      lonWest: -180,
+      lonEast: 180,
+      seaLevel: 0,
+      windMode: 'latitude',
+      mountainScale: 1.0,
+      moistureScale: 1.0,
+    };
+    setDraft(next);
+    onGenerateWorld(next);
+  };
+
+  const applyRegionPreset = (presetId: string) => {
+    const p = EARTH_REGION_PRESETS.find((r) => r.id === presetId);
+    if (!p) return;
+    const next: GeographyConfig = {
+      ...draft,
+      latNorth: p.latNorth,
+      latSouth: p.latSouth,
+      lonWest: p.lonWest,
+      lonEast: p.lonEast,
+      seaLevel: p.seaLevel,
+      windMode: p.windMode,
+    };
+    setDraft(next);
+  };
+
   return (
     <div className="bg-[#151d28] border border-slate-700/80 rounded-lg p-3 space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-amber-300 flex items-center gap-1.5">
           <Compass className="w-4 h-4" />
           ภูมิศาสตร์จริง & สร้างโลก
         </h3>
+        <button
+          onClick={applyRealEarthDefaults}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-[10px] font-medium text-sky-200 cursor-pointer shrink-0"
+          title="ใช้แผนที่โลกจริง พิกัด 85°N–85°S, 180°W–180°E, ระดับน้ำ 0 ม. และลมตามละติจูดโลกจริง"
+        >
+          <Globe className="w-3 h-3" />
+          เหมือนโลกจริง
+        </button>
       </div>
 
       <div>
@@ -91,7 +164,15 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
         <label className="block text-[11px] text-slate-400 mb-1">รูปแบบแผ่นดิน (Landmass)</label>
         <select
           value={draft.landmassType}
-          onChange={(e) => setDraft({ ...draft, landmassType: e.target.value as LandmassType })}
+          onChange={(e) => {
+            const lm = e.target.value as LandmassType;
+            setDraft({
+              ...draft,
+              landmassType: lm,
+              lonWest: draft.lonWest ?? -180,
+              lonEast: draft.lonEast ?? 180,
+            });
+          }}
           className="w-full bg-[#0f1620] border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 outline-none"
         >
           {LANDMASS_PRESETS.map((p) => (
@@ -102,66 +183,193 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
         </select>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="block text-[11px] text-slate-400 mb-1">
-            ละติจูดเหนือ ({draft.latNorth}°)
-          </label>
-          <input
-            type="range"
-            min={-60}
-            max={88}
-            value={draft.latNorth}
-            onChange={(e) => setDraft({ ...draft, latNorth: Number(e.target.value) })}
-            className="w-full"
-          />
+      {/* Lat/Lon Presets + Controls */}
+      <div className="bg-[#0f1620] border border-slate-800 rounded-md p-2 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-medium text-sky-300 flex items-center gap-1">
+            <Globe className="w-3 h-3" />
+            พิกัดละติจูด – ลองจิจูด
+          </span>
+          <span className="text-[10px] text-slate-500">
+            {formatLatitude(draft.latNorth)}..{formatLatitude(draft.latSouth)}
+          </span>
         </div>
-        <div>
-          <label className="block text-[11px] text-slate-400 mb-1">
-            ละติจูดใต้ ({draft.latSouth}°)
-          </label>
-          <input
-            type="range"
-            min={-88}
-            max={60}
-            value={draft.latSouth}
-            onChange={(e) => setDraft({ ...draft, latSouth: Number(e.target.value) })}
-            className="w-full"
-          />
+
+        <div className="flex flex-wrap gap-1">
+          {EARTH_REGION_PRESETS.map((p) => {
+            const active =
+              draft.latNorth === p.latNorth &&
+              draft.latSouth === p.latSouth &&
+              lonWest === p.lonWest &&
+              lonEast === p.lonEast;
+            return (
+              <button
+                key={p.id}
+                onClick={() => applyRegionPreset(p.id)}
+                className={`px-1.5 py-0.5 rounded border text-[10px] transition cursor-pointer ${
+                  active
+                    ? 'bg-sky-500/20 border-sky-400 text-sky-200 font-medium'
+                    : 'bg-[#151d28] border-slate-700/80 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] text-slate-400 mb-0.5">
+              ละติจูดเหนือ ({formatLatitude(draft.latNorth)})
+            </label>
+            <input
+              type="range"
+              min={-85}
+              max={90}
+              value={draft.latNorth}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setDraft({
+                  ...draft,
+                  latNorth: Math.max(v, draft.latSouth + 5),
+                });
+              }}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 mb-0.5">
+              ละติจูดใต้ ({formatLatitude(draft.latSouth)})
+            </label>
+            <input
+              type="range"
+              min={-90}
+              max={85}
+              value={draft.latSouth}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setDraft({
+                  ...draft,
+                  latSouth: Math.min(v, draft.latNorth - 5),
+                });
+              }}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 mb-0.5">
+              ลองจิจูดตะวันตก ({formatLongitude(lonWest)})
+            </label>
+            <input
+              type="range"
+              min={-180}
+              max={170}
+              value={lonWest}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setDraft({
+                  ...draft,
+                  lonWest: Math.min(v, lonEast - 10),
+                });
+              }}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 mb-0.5">
+              ลองจิจูดตะวันออก ({formatLongitude(lonEast)})
+            </label>
+            <input
+              type="range"
+              min={-170}
+              max={180}
+              value={lonEast}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setDraft({
+                  ...draft,
+                  lonEast: Math.max(v, lonWest + 10),
+                });
+              }}
+              className="w-full"
+            />
+          </div>
         </div>
       </div>
 
-      <div>
-        <label className="flex items-center gap-1 text-[11px] text-slate-400 mb-1">
+      {/* Wind Direction (2D) */}
+      <div className="space-y-1.5">
+        <label className="flex items-center gap-1 text-[11px] text-slate-400">
           <Wind className="w-3.5 h-3.5 text-sky-400" />
-          ระบบลมประจำถิ่น (เกิด Rain Shadow หลังภูเขา)
+          ทิศทางลม & ระบบลมประจำถิ่น (เกิด Rain Shadow)
         </label>
         <select
           value={draft.windMode}
           onChange={(e) => setDraft({ ...draft, windMode: e.target.value as WindMode })}
           className="w-full bg-[#0f1620] border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 outline-none"
         >
-          <option value="latitude">ตามแถบละติจูดจริง (Trade Winds & Westerlies)</option>
-          <option value="west">ลมตะวันตกพัดไปตะวันออก (W → E)</option>
-          <option value="east">ลมตะวันออกพัดไปตะวันตก (E → W)</option>
+          {WIND_MODE_OPTIONS.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.label}
+            </option>
+          ))}
         </select>
+        <div className="grid grid-cols-5 gap-1">
+          {WIND_MODE_OPTIONS.map((w) => (
+            <button
+              key={w.id}
+              onClick={() => setDraft({ ...draft, windMode: w.id })}
+              className={`py-0.5 px-1 rounded border text-[10px] truncate cursor-pointer ${
+                draft.windMode === w.id
+                  ? 'bg-sky-500/20 border-sky-400 text-sky-200 font-medium'
+                  : 'bg-[#0f1620] border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+              title={w.label}
+            >
+              {w.short}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-2 text-[11px] text-slate-300">
-        <div>
-          <div className="flex justify-between mb-0.5">
+        {/* Sea Level + Presets */}
+        <div className="space-y-1">
+          <div className="flex justify-between">
             <span>ระดับน้ำทะเล</span>
-            <span className="text-slate-400">{draft.seaLevel.toFixed(2)}</span>
+            <span className="text-sky-300 font-medium">
+              {draft.seaLevel.toFixed(2)} ({formatSeaLevelMeters(draft.seaLevel)})
+            </span>
           </div>
           <input
             type="range"
-            min={-0.25}
-            max={0.25}
-            step={0.02}
+            min={-0.35}
+            max={0.35}
+            step={0.01}
             value={draft.seaLevel}
             onChange={(e) => setDraft({ ...draft, seaLevel: Number(e.target.value) })}
             className="w-full"
           />
+          <div className="grid grid-cols-3 gap-1">
+            {[
+              { val: -0.15, label: 'ยุคน้ำแข็ง (-120ม.)' },
+              { val: 0, label: 'โลกจริง (0ม.)' },
+              { val: 0.1, label: 'น้ำท่วม (+80ม.)' },
+            ].map((s) => (
+              <button
+                key={s.label}
+                onClick={() => setDraft({ ...draft, seaLevel: s.val })}
+                className={`py-0.5 rounded border text-[10px] cursor-pointer ${
+                  Math.abs(draft.seaLevel - s.val) < 0.005
+                    ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                    : 'bg-[#0f1620] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>
