@@ -9,6 +9,7 @@ import {
   Mountain,
   Plus,
   Ruler,
+  SlidersHorizontal,
   Sparkles,
   Store,
   Trash2,
@@ -18,10 +19,10 @@ import {
 import { getAllBiomes } from '../data/biomes';
 import { SPECIAL_FEATURES } from '../data/features';
 import {
-  CULTURE_TYPES,
+  getAllCultureTypes,
+  getAllGovernmentTypes,
   getAllPoiTypes,
-  GOVERNMENT_TYPES,
-  RELIGION_TYPES,
+  getAllReligionTypes,
   TRAVEL_SPEEDS,
 } from '../data/goods';
 import { computeRealDimensions, findHexPath, realDistanceKm } from '../engine/hexMath';
@@ -82,6 +83,8 @@ interface RightSidebarProps {
   onUpdateReligions: (religions: Religion[]) => void;
   onUpdateCultures: (cultures: Culture[]) => void;
   onOpenCityTrade: (cityId: string) => void;
+  onOpenCityBlueprint: (cityId: string) => void;
+  onOpenLore: (kind: 'kingdom' | 'religion' | 'culture', id: string) => void;
   selectedCity: City | null;
   onUpdateCity: (id: string, patch: Partial<City>) => void;
   onDeleteCity: (id: string) => void;
@@ -140,6 +143,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onUpdateReligions,
     onUpdateCultures,
     onOpenCityTrade,
+    onOpenCityBlueprint,
+    onOpenLore,
     selectedCity,
     onUpdateCity,
     onDeleteCity,
@@ -167,6 +172,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
 
   const allBiomes = useMemo(() => getAllBiomes(map.customBiomes), [map.customBiomes]);
   const allPoiTypes = useMemo(() => getAllPoiTypes(map.customPoiTypes), [map.customPoiTypes]);
+  const govTypes = useMemo(
+    () => getAllGovernmentTypes(map.customGovernmentTypes),
+    [map.customGovernmentTypes]
+  );
+  const relTypes = useMemo(
+    () => getAllReligionTypes(map.customReligionTypes),
+    [map.customReligionTypes]
+  );
+  const cultTypes = useMemo(
+    () => getAllCultureTypes(map.customCultureTypes),
+    [map.customCultureTypes]
+  );
 
   const biomeCounts = useMemo(() => {
     const counts = new Map<number, number>();
@@ -243,6 +260,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           map={map}
           onUpdate={(patch) => onUpdateCity(selectedCity.id, patch)}
           onOpenTradeWindow={() => onOpenCityTrade(selectedCity.id)}
+          onOpenBlueprint={() => onOpenCityBlueprint(selectedCity.id)}
           onDelete={() => onDeleteCity(selectedCity.id)}
           onClose={onCloseCity}
         />
@@ -326,7 +344,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {map.kingdoms.map((k) => {
               const st = territoryStats.find((s) => s.kingdomId === k.id);
-              const gov = GOVERNMENT_TYPES.find((g) => g.id === k.government)?.label ?? k.government;
+              const gov = govTypes.find((g) => g.id === k.government)?.label ?? k.government;
               const selected = activeKingdomId === k.id && territorySubTool !== 'erase';
               return (
                 <button
@@ -410,12 +428,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
                 }
                 className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
               >
-                {GOVERNMENT_TYPES.map((g) => (
+                {govTypes.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.label}
                   </option>
                 ))}
               </select>
+              <button
+                onClick={() => onOpenLore('kingdom', activeKingdom.id)}
+                className="w-full flex items-center justify-center gap-1 py-1 rounded bg-[#1a2433] hover:bg-[#233044] border border-slate-700 text-[11px] text-amber-200 cursor-pointer"
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                ปรับแต่งละเอียด (ผู้นำ / กฎหมาย / ระบอบเอง)
+              </button>
             </div>
           )}
 
@@ -597,12 +622,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
                 }
                 className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
               >
-                {RELIGION_TYPES.map((rt) => (
+                {relTypes.map((rt) => (
                   <option key={rt.id} value={rt.id}>
                     {rt.label}
                   </option>
                 ))}
               </select>
+              <button
+                onClick={() => onOpenLore('religion', activeReligion.id)}
+                className="w-full flex items-center justify-center gap-1 py-1 rounded bg-[#1a2433] hover:bg-[#233044] border border-slate-700 text-[11px] text-purple-200 cursor-pointer"
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                ปรับแต่งละเอียด (เทพเจ้า / คำสอน / พิธีกรรม)
+              </button>
             </div>
           )}
 
@@ -699,7 +731,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             {(map.cultureList ?? []).map((cult) => {
               const st = cultureStats.find((s) => s.cultureId === cult.id);
               const cultLabel =
-                CULTURE_TYPES.find((ct) => ct.id === cult.type)?.label ?? cult.type;
+                cultTypes.find((ct) => ct.id === cult.type)?.label ?? cult.type;
               const selected = activeCultureId === cult.id && cultureSubTool !== 'erase';
               return (
                 <button
@@ -795,12 +827,19 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
                 }
                 className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
               >
-                {CULTURE_TYPES.map((ct) => (
+                {cultTypes.map((ct) => (
                   <option key={ct.id} value={ct.id}>
                     {ct.label}
                   </option>
                 ))}
               </select>
+              <button
+                onClick={() => onOpenLore('culture', activeCulture.id)}
+                className="w-full flex items-center justify-center gap-1 py-1 rounded bg-[#1a2433] hover:bg-[#233044] border border-slate-700 text-[11px] text-teal-200 cursor-pointer"
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                ปรับแต่งละเอียด (สถาปัตยกรรม / ภาษา / ประเพณี)
+              </button>
             </div>
           )}
 

@@ -1,6 +1,10 @@
 import { getAllBiomes, getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
-import { CULTURE_TYPES, getAllPoiTypes, GOVERNMENT_TYPES } from '../data/goods';
+import {
+  getAllCultureTypes,
+  getAllGovernmentTypes,
+  getAllPoiTypes,
+} from '../data/goods';
 import {
   BiomeDetailStyle,
   BiomeId,
@@ -905,7 +909,9 @@ function drawDynamicLayers(
 
   // 2. Political & Religion centroid labels
   if (options.overlay === 'political') {
-    const govMap = new Map(GOVERNMENT_TYPES.map((g) => [g.id, g.label]));
+    const govMap = new Map(
+      getAllGovernmentTypes(map.customGovernmentTypes).map((g) => [g.id, g.label])
+    );
     drawCentroidLabels(
       ctx,
       map,
@@ -931,7 +937,9 @@ function drawDynamicLayers(
       zoom
     );
   } else if (options.overlay === 'culture' || layers.cultures) {
-    const cultTypeMap = new Map(CULTURE_TYPES.map((ct) => [ct.id, ct.label]));
+    const cultTypeMap = new Map(
+      getAllCultureTypes(map.customCultureTypes).map((ct) => [ct.id, ct.label])
+    );
     drawCentroidLabels(
       ctx,
       map,

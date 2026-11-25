@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Store, Trash2, X } from 'lucide-react';
+import { Building2, Sparkles, Store, Trash2, X } from 'lucide-react';
 import { CITY_TIERS } from '../data/goods';
 import { autoSuggestGoodsForCity } from '../engine/worldGenerator';
 import { City, CityTier, HexMapData } from '../types/map';
@@ -9,6 +9,7 @@ interface CityInspectorProps {
   map: HexMapData;
   onUpdate: (patch: Partial<City>) => void;
   onOpenTradeWindow: () => void;
+  onOpenBlueprint: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -18,6 +19,7 @@ export const CityInspector: React.FC<CityInspectorProps> = ({
   map,
   onUpdate,
   onOpenTradeWindow,
+  onOpenBlueprint,
   onDelete,
   onClose,
 }) => {
@@ -138,18 +140,33 @@ export const CityInspector: React.FC<CityInspectorProps> = ({
         </div>
       </div>
 
-      <button
-        onClick={onOpenTradeWindow}
-        className="w-full flex items-center justify-between py-1.5 px-2.5 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/45 text-sky-200 text-xs font-medium transition cursor-pointer"
-      >
-        <span className="flex items-center gap-1.5">
-          <Store className="w-3.5 h-3.5 text-sky-400" />
-          <span>เปิดหน้าต่างการค้าของเมือง</span>
-        </span>
-        <span className="px-1.5 py-0.5 rounded bg-sky-500/25 text-[10px] text-sky-100">
-          {connectedRouteCount} เส้นทาง
-        </span>
-      </button>
+      <div className="space-y-1.5">
+        <button
+          onClick={onOpenBlueprint}
+          className="w-full flex items-center justify-between py-1.5 px-2.5 rounded bg-purple-500/18 hover:bg-purple-500/28 border border-purple-400/50 text-purple-100 text-xs font-medium transition cursor-pointer"
+        >
+          <span className="flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-purple-300" />
+            <span>แผนผังเมือง 2D & ปรับแต่งละเอียด</span>
+          </span>
+          <span className="px-1.5 py-0.5 rounded bg-purple-500/25 text-[10px] text-purple-200">
+            {city.plan ? `${city.plan.districts.length} เขต` : 'สร้างผัง'}
+          </span>
+        </button>
+
+        <button
+          onClick={onOpenTradeWindow}
+          className="w-full flex items-center justify-between py-1.5 px-2.5 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/45 text-sky-200 text-xs font-medium transition cursor-pointer"
+        >
+          <span className="flex items-center gap-1.5">
+            <Store className="w-3.5 h-3.5 text-sky-400" />
+            <span>เปิดหน้าต่างการค้าของเมือง</span>
+          </span>
+          <span className="px-1.5 py-0.5 rounded bg-sky-500/25 text-[10px] text-sky-100">
+            {connectedRouteCount} เส้นทาง
+          </span>
+        </button>
+      </div>
 
       <button
         onClick={handleAutoSuggest}

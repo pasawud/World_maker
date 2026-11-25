@@ -61,6 +61,12 @@ export interface SpecialFeatureMeta {
   goodsBonus: string[];
 }
 
+export interface CustomCategoryType {
+  id: string;
+  label: string;
+  description?: string;
+}
+
 export type GovernmentType =
   | 'monarchy'
   | 'empire'
@@ -68,14 +74,34 @@ export type GovernmentType =
   | 'federation'
   | 'theocracy'
   | 'city_state'
-  | 'tribal';
+  | 'tribal'
+  | (string & {});
 
 export type ReligionType =
   | 'monotheism'
   | 'polytheism'
   | 'animism'
   | 'philosophy'
-  | 'arcane';
+  | 'arcane'
+  | (string & {});
+
+export interface ReligionDeity {
+  id: string;
+  name: string;
+  domain: string;
+  symbol?: string;
+}
+
+export interface ReligionDetails {
+  deities: ReligionDeity[];
+  tenets: string[];
+  taboos: string[];
+  clergyStructure: string;
+  rituals: string[];
+  holyCityIds: string[];
+  sacredText?: string;
+  headTitle?: string;
+}
 
 export interface Religion {
   id: string;
@@ -84,6 +110,7 @@ export interface Religion {
   symbol: string;
   type: ReligionType;
   description?: string;
+  details?: ReligionDetails;
 }
 
 export type CultureType =
@@ -93,7 +120,17 @@ export type CultureType =
   | 'highland'
   | 'mercantile'
   | 'scholarly'
-  | 'martial';
+  | 'martial'
+  | (string & {});
+
+export interface CultureDetails {
+  architectureStyle: string;
+  languageFamily: string;
+  namingStyle: string;
+  traditions: string[];
+  values: string[];
+  clothingStyle?: string;
+}
 
 export interface Culture {
   id: string;
@@ -102,6 +139,7 @@ export interface Culture {
   symbol: string;
   type: CultureType;
   description?: string;
+  details?: CultureDetails;
 }
 
 export type LandmassType =
@@ -146,6 +184,111 @@ export interface RiverPath {
 
 export type CityTier = 'village' | 'town' | 'city' | 'capital' | 'port';
 
+export type CityDistrictType =
+  | 'citadel'
+  | 'noble'
+  | 'market'
+  | 'temple'
+  | 'harbor'
+  | 'craftsmen'
+  | 'residential'
+  | 'slums'
+  | 'academy'
+  | 'barracks'
+  | 'farmstead';
+
+export interface CityDistrict {
+  id: string;
+  name: string;
+  type: CityDistrictType;
+  x: number; // 0..1000 city canvas space
+  y: number;
+  radius: number;
+  color: string;
+  populationShare: number;
+  notes?: string;
+}
+
+export type CityBuildingCategory =
+  | 'palace'
+  | 'temple'
+  | 'market'
+  | 'fortress'
+  | 'port'
+  | 'guild'
+  | 'tavern'
+  | 'academy'
+  | 'monument'
+  | 'gate'
+  | 'custom';
+
+export interface CityBuilding {
+  id: string;
+  name: string;
+  category: CityBuildingCategory;
+  symbol: string;
+  x: number;
+  y: number;
+  districtId?: string;
+  religionId?: string;
+  description?: string;
+}
+
+export interface CityRoadSegment {
+  id: string;
+  kind: 'main' | 'alley' | 'bridge';
+  points: { x: number; y: number }[];
+}
+
+export interface CityGate {
+  id: string;
+  name: string;
+  angle: number; // radians
+}
+
+export type CityLayoutStyle =
+  | 'radial'
+  | 'grid'
+  | 'coastal_crescent'
+  | 'river_twin'
+  | 'hilltop_fort';
+
+export type CityWallStyle = 'none' | 'wooden' | 'stone' | 'citadel_double';
+export type CardinalSide = 'none' | 'north' | 'south' | 'east' | 'west';
+
+export interface CityDemographicSlice {
+  id: string;
+  percent: number;
+}
+
+export interface CityPlanData {
+  seed: number;
+  layoutStyle: CityLayoutStyle;
+  hasWalls: boolean;
+  wallStyle: CityWallStyle;
+  wallRadius: number;
+  waterSide: CardinalSide;
+  hasRiver: boolean;
+  riverAngle: number;
+  hasCliff: boolean;
+  cliffSide: CardinalSide;
+  districts: CityDistrict[];
+  buildings: CityBuilding[];
+  roads: CityRoadSegment[];
+  gates: CityGate[];
+}
+
+export interface CityDeepProfile {
+  motto?: string;
+  rulerName?: string;
+  garrisonSize?: number;
+  defenseRating?: number;
+  foundedYear?: number;
+  architectureStyle?: string;
+  religionMix?: CityDemographicSlice[];
+  cultureMix?: CityDemographicSlice[];
+}
+
 export interface City {
   id: string;
   name: string;
@@ -159,6 +302,18 @@ export interface City {
   producedGoods: string[];
   demandedGoods: string[];
   notes: string;
+  plan?: CityPlanData;
+  profile?: CityDeepProfile;
+}
+
+export interface GovernmentDetails {
+  rulerTitle: string;
+  rulerName?: string;
+  succession: string;
+  powerStructure: string;
+  laws: string[];
+  motto?: string;
+  capitalCityId?: string;
 }
 
 export interface Kingdom {
@@ -167,6 +322,7 @@ export interface Kingdom {
   color: string;
   government: GovernmentType;
   description?: string;
+  details?: GovernmentDetails;
 }
 
 export interface TradeGood {
@@ -221,6 +377,54 @@ export interface MapLabel {
   style: LabelStyle;
 }
 
+export type RleStringRuns = [string, number][];
+
+export type TimelineEventCategory =
+  | 'founding'
+  | 'war'
+  | 'treaty'
+  | 'religion'
+  | 'culture'
+  | 'trade'
+  | 'disaster'
+  | 'other';
+
+export interface TimelineEvent {
+  id: string;
+  year: number;
+  title: string;
+  category: TimelineEventCategory;
+  description: string;
+  q?: number;
+  r?: number;
+  cityId?: string;
+  kingdomId?: string;
+  religionId?: string;
+  cultureId?: string;
+}
+
+export interface TimelineEraSnapshot {
+  id: string;
+  name: string;
+  year: number;
+  summary: string;
+  territoriesRle: RleStringRuns;
+  religionsRle: RleStringRuns;
+  culturesRle: RleStringRuns;
+  cities: City[];
+  tradeRoutes: TradeRoute[];
+  kingdoms: Kingdom[];
+  religionList: Religion[];
+  cultureList: Culture[];
+}
+
+export interface WorldTimeline {
+  calendarUnit: string;
+  activeEraId: string;
+  eras: TimelineEraSnapshot[];
+  events: TimelineEvent[];
+}
+
 export interface HexMapData {
   version: 1;
   id: string;
@@ -246,6 +450,10 @@ export interface HexMapData {
   goods: TradeGood[];
   customBiomes: CustomBiome[];
   customPoiTypes: CustomPoiType[];
+  customGovernmentTypes?: CustomCategoryType[];
+  customReligionTypes?: CustomCategoryType[];
+  customCultureTypes?: CustomCategoryType[];
+  timeline?: WorldTimeline;
   roads: RoadPath[];
   tradeRoutes: TradeRoute[];
   pois: PointOfInterest[];

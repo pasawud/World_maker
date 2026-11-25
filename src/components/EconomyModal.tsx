@@ -1,9 +1,25 @@
 import React, { useState } from 'react';
-import { Building2, Crown, Flame, Landmark, Package, Plus, Store, Trash2, X } from 'lucide-react';
-import { CULTURE_TYPES, GOVERNMENT_TYPES, RELIGION_TYPES } from '../data/goods';
+import {
+  Building2,
+  Crown,
+  Flame,
+  Landmark,
+  Package,
+  Plus,
+  SlidersHorizontal,
+  Store,
+  Trash2,
+  X,
+} from 'lucide-react';
+import {
+  getAllCultureTypes,
+  getAllGovernmentTypes,
+  getAllReligionTypes,
+} from '../data/goods';
 import {
   Culture,
   CultureType,
+  CustomCategoryType,
   GovernmentType,
   HexMapData,
   Kingdom,
@@ -18,9 +34,14 @@ interface EconomyModalProps {
   onUpdateKingdoms: (kingdoms: Kingdom[]) => void;
   onUpdateReligions: (religions: Religion[]) => void;
   onUpdateCultures: (cultures: Culture[]) => void;
+  onAddCustomGovernmentType: (label: string) => CustomCategoryType;
+  onAddCustomReligionType: (label: string) => CustomCategoryType;
+  onAddCustomCultureType: (label: string) => CustomCategoryType;
   onDeleteTradeRoute: (id: string) => void;
   onSelectCity: (cityId: string) => void;
   onOpenCityTrade: (cityId: string) => void;
+  onOpenCityBlueprint: (cityId: string) => void;
+  onOpenLore: (kind: 'kingdom' | 'religion' | 'culture', id: string) => void;
   onClose: () => void;
 }
 
@@ -30,11 +51,20 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
   onUpdateKingdoms,
   onUpdateReligions,
   onUpdateCultures,
+  onAddCustomGovernmentType,
+  onAddCustomReligionType,
+  onAddCustomCultureType,
   onDeleteTradeRoute,
   onSelectCity,
   onOpenCityTrade,
+  onOpenCityBlueprint,
+  onOpenLore,
   onClose,
 }) => {
+  const govTypes = getAllGovernmentTypes(map.customGovernmentTypes);
+  const relTypes = getAllReligionTypes(map.customReligionTypes);
+  const cultTypes = getAllCultureTypes(map.customCultureTypes);
+  const [customTypeInput, setCustomTypeInput] = useState('');
   const [tab, setTab] = useState<'goods' | 'cities' | 'routes' | 'kingdoms' | 'religions' | 'cultures'>('goods');
   const [newGoodName, setNewGoodName] = useState('');
   const [newGoodIcon, setNewGoodIcon] = useState('📦');
@@ -253,6 +283,15 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           onClick={() => {
+                            onOpenCityBlueprint(c.id);
+                            onClose();
+                          }}
+                          className="px-2.5 py-1 rounded bg-purple-500/18 hover:bg-purple-500/28 border border-purple-400/45 text-purple-200 cursor-pointer"
+                        >
+                          ผังเมือง
+                        </button>
+                        <button
+                          onClick={() => {
                             onOpenCityTrade(c.id);
                             onClose();
                           }}
@@ -297,9 +336,9 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   onChange={(e) => setNewKingdomGov(e.target.value as GovernmentType)}
                   className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
                 >
-                  {GOVERNMENT_TYPES.map((g) => (
+                  {govTypes.map((g) => (
                     <option key={g.id} value={g.id}>
-                      {g.label}
+                      {g.label} {g.isCustom ? '[กำหนดเอง]' : ''}
                     </option>
                   ))}
                 </select>
@@ -308,6 +347,25 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   className="flex items-center gap-1 px-3 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> เพิ่มรัฐ
+                </button>
+              </div>
+              <div className="flex gap-2 bg-[#0f1620] px-2.5 py-2 rounded-lg border border-slate-800/80">
+                <input
+                  value={customTypeInput}
+                  onChange={(e) => setCustomTypeInput(e.target.value)}
+                  placeholder="สร้างระบอบการปกครองใหม่เอง เช่น สภาจอมเวท, รัฐพ่อค้า..."
+                  className="flex-1 bg-[#161f2c] border border-slate-700 rounded px-2.5 py-1 text-slate-100 outline-none"
+                />
+                <button
+                  onClick={() => {
+                    if (!customTypeInput.trim()) return;
+                    const created = onAddCustomGovernmentType(customTypeInput);
+                    setNewKingdomGov(created.id);
+                    setCustomTypeInput('');
+                  }}
+                  className="px-2.5 py-1 rounded bg-amber-500/20 border border-amber-500/50 text-amber-200 cursor-pointer"
+                >
+                  + เพิ่มระบอบปกครอง
                 </button>
               </div>
               <div className="space-y-1.5">
@@ -355,12 +413,22 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                       }
                       className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
                     >
-                      {GOVERNMENT_TYPES.map((g) => (
+                      {govTypes.map((g) => (
                         <option key={g.id} value={g.id}>
                           {g.label}
                         </option>
                       ))}
                     </select>
+                    <button
+                      onClick={() => {
+                        onOpenLore('kingdom', k.id);
+                        onClose();
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-[#1a2433] hover:bg-[#233044] border border-slate-700 text-[11px] text-amber-200 cursor-pointer"
+                      title="ปรับแต่งตำแหน่งผู้นำ กฎหมาย โครงสร้างอำนาจ"
+                    >
+                      <SlidersHorizontal className="w-3 h-3" /> ละเอียด
+                    </button>
                     <button
                       onClick={() =>
                         onUpdateKingdoms(map.kingdoms.filter((x) => x.id !== k.id))
@@ -401,9 +469,9 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   onChange={(e) => setNewRelType(e.target.value as ReligionType)}
                   className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
                 >
-                  {RELIGION_TYPES.map((rt) => (
+                  {relTypes.map((rt) => (
                     <option key={rt.id} value={rt.id}>
-                      {rt.label}
+                      {rt.label} {rt.isCustom ? '[กำหนดเอง]' : ''}
                     </option>
                   ))}
                 </select>
@@ -412,6 +480,25 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   className="flex items-center gap-1 px-3 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> เพิ่มศาสนา
+                </button>
+              </div>
+              <div className="flex gap-2 bg-[#0f1620] px-2.5 py-2 rounded-lg border border-slate-800/80">
+                <input
+                  value={customTypeInput}
+                  onChange={(e) => setCustomTypeInput(e.target.value)}
+                  placeholder="สร้างประเภทศาสนาใหม่เอง เช่น บูชาบรรพบุรุษ, เทวัญจักรกล..."
+                  className="flex-1 bg-[#161f2c] border border-slate-700 rounded px-2.5 py-1 text-slate-100 outline-none"
+                />
+                <button
+                  onClick={() => {
+                    if (!customTypeInput.trim()) return;
+                    const created = onAddCustomReligionType(customTypeInput);
+                    setNewRelType(created.id);
+                    setCustomTypeInput('');
+                  }}
+                  className="px-2.5 py-1 rounded bg-purple-500/20 border border-purple-400/50 text-purple-200 cursor-pointer"
+                >
+                  + เพิ่มประเภทศาสนา
                 </button>
               </div>
               <div className="space-y-1.5">
@@ -471,12 +558,22 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                       }
                       className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
                     >
-                      {RELIGION_TYPES.map((rt) => (
+                      {relTypes.map((rt) => (
                         <option key={rt.id} value={rt.id}>
                           {rt.label}
                         </option>
                       ))}
                     </select>
+                    <button
+                      onClick={() => {
+                        onOpenLore('religion', rel.id);
+                        onClose();
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-[#1a2433] hover:bg-[#233044] border border-slate-700 text-[11px] text-purple-200 cursor-pointer"
+                      title="ปรับแต่งเทพเจ้า หลักคำสอน ข้อห้าม พิธีกรรม เมืองศักดิ์สิทธิ์"
+                    >
+                      <SlidersHorizontal className="w-3 h-3" /> ละเอียด
+                    </button>
                     <button
                       onClick={() =>
                         onUpdateReligions(map.religionList.filter((x) => x.id !== rel.id))
@@ -517,9 +614,9 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   onChange={(e) => setNewCultType(e.target.value as CultureType)}
                   className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
                 >
-                  {CULTURE_TYPES.map((ct) => (
+                  {cultTypes.map((ct) => (
                     <option key={ct.id} value={ct.id}>
-                      {ct.label}
+                      {ct.label} {ct.isCustom ? '[กำหนดเอง]' : ''}
                     </option>
                   ))}
                 </select>
@@ -528,6 +625,25 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                   className="flex items-center gap-1 px-3 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> เพิ่มวัฒนธรรม
+                </button>
+              </div>
+              <div className="flex gap-2 bg-[#0f1620] px-2.5 py-2 rounded-lg border border-slate-800/80">
+                <input
+                  value={customTypeInput}
+                  onChange={(e) => setCustomTypeInput(e.target.value)}
+                  placeholder="สร้างประเภทวัฒนธรรมใหม่เอง เช่น นครใต้ดิน, ชนเผ่าเวหา..."
+                  className="flex-1 bg-[#161f2c] border border-slate-700 rounded px-2.5 py-1 text-slate-100 outline-none"
+                />
+                <button
+                  onClick={() => {
+                    if (!customTypeInput.trim()) return;
+                    const created = onAddCustomCultureType(customTypeInput);
+                    setNewCultType(created.id);
+                    setCustomTypeInput('');
+                  }}
+                  className="px-2.5 py-1 rounded bg-teal-500/20 border border-teal-400/50 text-teal-200 cursor-pointer"
+                >
+                  + เพิ่มประเภทวัฒนธรรม
                 </button>
               </div>
               <div className="space-y-1.5">
@@ -587,12 +703,22 @@ export const EconomyModal: React.FC<EconomyModalProps> = ({
                       }
                       className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
                     >
-                      {CULTURE_TYPES.map((ct) => (
+                      {cultTypes.map((ct) => (
                         <option key={ct.id} value={ct.id}>
                           {ct.label}
                         </option>
                       ))}
                     </select>
+                    <button
+                      onClick={() => {
+                        onOpenLore('culture', cult.id);
+                        onClose();
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-[#1a2433] hover:bg-[#233044] border border-slate-700 text-[11px] text-teal-200 cursor-pointer"
+                      title="ปรับแต่งสถาปัตยกรรม ภาษา ประเพณี ค่านิยม"
+                    >
+                      <SlidersHorizontal className="w-3 h-3" /> ละเอียด
+                    </button>
                     <button
                       onClick={() =>
                         onUpdateCultures((map.cultureList ?? []).filter((x) => x.id !== cult.id))

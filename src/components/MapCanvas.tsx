@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
-import { getAllPoiTypes, GOVERNMENT_TYPES } from '../data/goods';
+import { getAllGovernmentTypes, getAllPoiTypes } from '../data/goods';
 import {
   findHexPath,
   hexDistance,
@@ -639,7 +639,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const kingdomId = map.territories?.[idx] ?? '';
     const kingdom = kingdomId ? map.kingdoms.find((k) => k.id === kingdomId) : null;
     const govLabel = kingdom
-      ? GOVERNMENT_TYPES.find((g) => g.id === kingdom.government)?.label
+      ? getAllGovernmentTypes(map.customGovernmentTypes).find((g) => g.id === kingdom.government)
+          ?.label ?? kingdom.government
       : null;
     const relId = map.religions?.[idx] ?? '';
     const religion = relId ? map.religionList.find((r) => r.id === relId) : null;

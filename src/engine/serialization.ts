@@ -1,11 +1,12 @@
 import { DEFAULT_CULTURES, DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
-import { BiomeId, City, HexMapData, Kingdom } from '../types/map';
+import { BiomeId, City, CustomCategoryType, HexMapData, Kingdom, WorldTimeline } from '../types/map';
 import { findHexPath, hexIndex } from './hexMath';
 import {
   generateCulturesFromCities,
   generateReligionsFromCities,
   generateTerritoriesFromCities,
 } from './politics';
+import { createSnapshotFromMap } from './timeline';
 import { DEFAULT_GEOGRAPHY_CONFIG, generateWorld } from './worldGenerator';
 
 const AUTOSAVE_KEY = 'hex-worldmaker:autosave:v1';
@@ -106,6 +107,7 @@ export function parseMapFromJson(raw: string): HexMapData {
     color: k.color || '#f59e0b',
     government: k.government || 'monarchy',
     description: k.description,
+    details: k.details,
   }));
 
   const rawCities = Array.isArray(obj.cities) ? (obj.cities as Partial<City>[]) : [];
@@ -122,6 +124,8 @@ export function parseMapFromJson(raw: string): HexMapData {
     producedGoods: Array.isArray(c.producedGoods) ? c.producedGoods : [],
     demandedGoods: Array.isArray(c.demandedGoods) ? c.demandedGoods : [],
     notes: c.notes || '',
+    plan: c.plan,
+    profile: c.profile,
   }));
 
   const biomes = obj.biomes.map((b) =>
@@ -212,6 +216,34 @@ export function parseMapFromJson(raw: string): HexMapData {
         : DEFAULT_GOODS.map((g) => ({ ...g })),
     customBiomes,
     customPoiTypes,
+    customGovernmentTypes: Array.isArray(obj.customGovernmentTypes)
+      ? (obj.customGovernmentTypes as CustomCategoryType[])
+      : [],
+    customReligionTypes: Array.isArray(obj.customReligionTypes)
+      ? (obj.customReligionTypes as CustomCategoryType[])
+      : [],
+    customCultureTypes: Array.isArray(obj.customCultureTypes)
+      ? (obj.customCultureTypes as CustomCategoryType[])
+      : [],
+    timeline:
+      obj.timeline &&
+      typeof obj.timeline === 'object' &&
+      Array.isArray((obj.timeline as Partial<WorldTimeline>).eras)
+        ? {
+            calendarUnit:
+              typeof (obj.timeline as Partial<WorldTimeline>).calendarUnit === 'string'
+                ? (obj.timeline as WorldTimeline).calendarUnit
+                : 'ปีศักราช',
+            activeEraId:
+              typeof (obj.timeline as Partial<WorldTimeline>).activeEraId === 'string'
+                ? (obj.timeline as WorldTimeline).activeEraId
+                : (obj.timeline as WorldTimeline).eras[0]?.id ?? 'era_1',
+            eras: (obj.timeline as WorldTimeline).eras,
+            events: Array.isArray((obj.timeline as Partial<WorldTimeline>).events)
+              ? (obj.timeline as WorldTimeline).events
+              : [],
+          }
+        : undefined,
     roads,
     tradeRoutes: Array.isArray(obj.tradeRoutes) ? (obj.tradeRoutes as HexMapData['tradeRoutes']) : [],
     pois: Array.isArray(obj.pois) ? (obj.pois as HexMapData['pois']) : [],
@@ -242,6 +274,9 @@ export function resizeMap(
       cultureList: map.cultureList,
       customBiomes: map.customBiomes,
       customPoiTypes: map.customPoiTypes,
+      customGovernmentTypes: map.customGovernmentTypes ?? [],
+      customReligionTypes: map.customReligionTypes ?? [],
+      customCultureTypes: map.customCultureTypes ?? [],
     };
   }
 
@@ -330,6 +365,27 @@ export function resizeMap(
         travelDays: Number(Math.max(0.5, distanceKm / speed).toFixed(1)),
       };
     });
+
+  if (nextMap.timeline) {
+    const activeEra =
+      nextMap.timeline.eras.find((e) => e.id === nextMap.timeline!.activeEraId) ??
+      nextMap.timeline.eras[0];
+    if (activeEra) {
+      nextMap.timeline = {
+        ...nextMap.timeline,
+        activeEraId: activeEra.id,
+        eras: [
+          createSnapshotFromMap(
+            nextMap,
+            activeEra.id,
+            activeEra.name,
+            activeEra.year,
+            activeEra.summary
+          ),
+        ],
+      };
+    }
+  }
 
   return nextMap;
 }

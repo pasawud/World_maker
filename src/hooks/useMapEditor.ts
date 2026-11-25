@@ -21,6 +21,12 @@ import {
 } from '../engine/politics';
 import { loadAutosave, resizeMap, saveAutosave } from '../engine/serialization';
 import {
+  createInitialTimeline,
+  createNewEraFromCurrent,
+  saveCurrentMapIntoActiveEra,
+  switchMapToEra,
+} from '../engine/timeline';
+import {
   autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
@@ -32,6 +38,7 @@ import {
   ClimateOverlay,
   Culture,
   CustomBiome,
+  CustomCategoryType,
   CustomPoiType,
   GeographyConfig,
   HexCoord,
@@ -45,6 +52,7 @@ import {
   ToolMode,
   TradeMode,
   TravelSpeedId,
+  WorldTimeline,
 } from '../types/map';
 
 const MAX_HISTORY = 40;
@@ -835,6 +843,9 @@ export function useMapEditor() {
           cultureList: prev.cultureList,
           customBiomes: prev.customBiomes,
           customPoiTypes: prev.customPoiTypes,
+          customGovernmentTypes: prev.customGovernmentTypes,
+          customReligionTypes: prev.customReligionTypes,
+          customCultureTypes: prev.customCultureTypes,
         };
       });
       setSelectedCityId(null);
@@ -906,6 +917,7 @@ export function useMapEditor() {
         tradeRoutes: [],
         pois: [],
         labels: [],
+        timeline: undefined,
       };
     });
     setSelectedCityId(null);
@@ -992,6 +1004,151 @@ export function useMapEditor() {
         }),
         []
       );
+    },
+    [commitMapChange]
+  );
+
+  const addCustomGovernmentType = useCallback(
+    (label: string, description?: string): CustomCategoryType => {
+      const created: CustomCategoryType = {
+        id: `gov_custom_${Date.now().toString(36)}`,
+        label: label.trim(),
+        description,
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customGovernmentTypes: [...(prev.customGovernmentTypes ?? []), created],
+        }),
+        []
+      );
+      return created;
+    },
+    [commitMapChange]
+  );
+
+  const deleteCustomGovernmentType = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customGovernmentTypes: (prev.customGovernmentTypes ?? []).filter((t) => t.id !== id),
+          kingdoms: prev.kingdoms.map((k) =>
+            k.government === id ? { ...k, government: 'monarchy' } : k
+          ),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const addCustomReligionType = useCallback(
+    (label: string, description?: string): CustomCategoryType => {
+      const created: CustomCategoryType = {
+        id: `rel_custom_${Date.now().toString(36)}`,
+        label: label.trim(),
+        description,
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customReligionTypes: [...(prev.customReligionTypes ?? []), created],
+        }),
+        []
+      );
+      return created;
+    },
+    [commitMapChange]
+  );
+
+  const deleteCustomReligionType = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customReligionTypes: (prev.customReligionTypes ?? []).filter((t) => t.id !== id),
+          religionList: prev.religionList.map((r) =>
+            r.type === id ? { ...r, type: 'monotheism' } : r
+          ),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const addCustomCultureType = useCallback(
+    (label: string, description?: string): CustomCategoryType => {
+      const created: CustomCategoryType = {
+        id: `cult_custom_${Date.now().toString(36)}`,
+        label: label.trim(),
+        description,
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customCultureTypes: [...(prev.customCultureTypes ?? []), created],
+        }),
+        []
+      );
+      return created;
+    },
+    [commitMapChange]
+  );
+
+  const deleteCustomCultureType = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customCultureTypes: (prev.customCultureTypes ?? []).filter((t) => t.id !== id),
+          cultureList: (prev.cultureList ?? []).map((c) =>
+            c.type === id ? { ...c, type: 'agrarian' } : c
+          ),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const ensureTimeline = useCallback(() => {
+    commitMapChange(
+      (prev) => (prev.timeline ? prev : { ...prev, timeline: createInitialTimeline(prev) }),
+      []
+    );
+  }, [commitMapChange]);
+
+  const switchEra = useCallback(
+    (eraId: string) => {
+      commitMapChange((prev) => switchMapToEra(prev, eraId));
+      setSelectedCityId(null);
+      setTradeStartCityId(null);
+    },
+    [commitMapChange]
+  );
+
+  const createEraFromCurrent = useCallback(
+    (name: string, year: number, summary = '') => {
+      commitMapChange((prev) => createNewEraFromCurrent(prev, name, year, summary), []);
+    },
+    [commitMapChange]
+  );
+
+  const saveActiveEra = useCallback(() => {
+    commitMapChange((prev) => saveCurrentMapIntoActiveEra(prev), []);
+  }, [commitMapChange]);
+
+  const updateTimelineMeta = useCallback(
+    (updater: (tl: WorldTimeline) => WorldTimeline) => {
+      commitMapChange((prev) => {
+        const currentTl = prev.timeline ?? createInitialTimeline(prev);
+        return {
+          ...prev,
+          timeline: updater(currentTl),
+        };
+      }, []);
     },
     [commitMapChange]
   );
@@ -1096,5 +1253,16 @@ export function useMapEditor() {
     addCustomPoiType,
     deleteCustomPoiType,
     eraseRoadNear,
+    addCustomGovernmentType,
+    deleteCustomGovernmentType,
+    addCustomReligionType,
+    deleteCustomReligionType,
+    addCustomCultureType,
+    deleteCustomCultureType,
+    ensureTimeline,
+    switchEra,
+    createEraFromCurrent,
+    saveActiveEra,
+    updateTimelineMeta,
   };
 }

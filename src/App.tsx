@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
+import { CityBlueprintModal } from './components/CityBlueprintModal';
 import { CityTradeModal } from './components/CityTradeModal';
 import { CustomAssetsModal } from './components/CustomAssetsModal';
 import { EconomyModal } from './components/EconomyModal';
+import { EntityLoreModal } from './components/EntityLoreModal';
 import { ExportImportModal } from './components/ExportImportModal';
 import { MapCanvas } from './components/MapCanvas';
 import { MapSizeModal } from './components/MapSizeModal';
 import { RightSidebar } from './components/RightSidebar';
 import { SubBar } from './components/SubBar';
+import { TimelineBar } from './components/TimelineBar';
+import { TimelineModal } from './components/TimelineModal';
 import { TopBar } from './components/TopBar';
 import { getAllPoiTypes } from './data/goods';
 import { hexDistance } from './engine/hexMath';
 import { exportMapToPng } from './engine/renderer';
+import { createInitialTimeline } from './engine/timeline';
 import { useMapEditor } from './hooks/useMapEditor';
 import { ToolMode } from './types/map';
 
@@ -21,6 +26,13 @@ export function App() {
   const [customModalTab, setCustomModalTab] = useState<'biomes' | 'pois' | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [tradeModalCityId, setTradeModalCityId] = useState<string | null>(null);
+  const [blueprintCityId, setBlueprintCityId] = useState<string | null>(null);
+  const [loreModal, setLoreModal] = useState<{
+    kind: 'kingdom' | 'religion' | 'culture';
+    id: string;
+  } | null>(null);
+  const [showTimelineBar, setShowTimelineBar] = useState(false);
+  const [showTimelineModal, setShowTimelineModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -134,6 +146,11 @@ export function App() {
         onChangeOverlay={editor.setClimateOverlay}
         layers={editor.layers}
         onToggleLayer={editor.toggleLayer}
+        showTimelineBar={showTimelineBar}
+        onToggleTimelineBar={() => {
+          if (!showTimelineBar) editor.ensureTimeline();
+          setShowTimelineBar((s) => !s);
+        }}
         onOpenSizeModal={() => setShowSizeModal(true)}
         onOpenEconomyModal={() => setShowEconomyModal(true)}
         onOpenCustomModal={() => setCustomModalTab('biomes')}
@@ -141,7 +158,8 @@ export function App() {
       />
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        <MapCanvas
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          <MapCanvas
           map={editor.map}
           tool={editor.tool}
           activeBiome={editor.activeBiome}
@@ -283,6 +301,26 @@ export function App() {
           }}
           onNotify={showToast}
         />
+          {showTimelineBar && (
+            <TimelineBar
+              timeline={editor.map.timeline ?? createInitialTimeline(editor.map)}
+              onSwitchEra={(eraId) => {
+                editor.switchEra(eraId);
+                showToast('สลับยุคสมัยบนแผนที่แล้ว');
+              }}
+              onSaveActiveEra={() => {
+                editor.saveActiveEra();
+                showToast('บันทึกสภาพแผนที่ลงในยุคปัจจุบันแล้ว');
+              }}
+              onCreateEra={(name, year) => {
+                editor.createEraFromCurrent(name, year);
+                showToast(`สร้างยุค "${name}" เรียบร้อยแล้ว`);
+              }}
+              onOpenTimelineModal={() => setShowTimelineModal(true)}
+              onCloseBar={() => setShowTimelineBar(false)}
+            />
+          )}
+        </div>
 
         <RightSidebar
           map={editor.map}
@@ -340,6 +378,8 @@ export function App() {
           onUpdateReligions={editor.updateReligions}
           onUpdateCultures={editor.updateCultures}
           onOpenCityTrade={(cityId) => setTradeModalCityId(cityId)}
+          onOpenCityBlueprint={(cityId) => setBlueprintCityId(cityId)}
+          onOpenLore={(kind, id) => setLoreModal({ kind, id })}
           selectedCity={selectedCity}
           onUpdateCity={editor.updateCity}
           onDeleteCity={editor.deleteCity}
@@ -406,6 +446,9 @@ export function App() {
           onUpdateKingdoms={editor.updateKingdoms}
           onUpdateReligions={editor.updateReligions}
           onUpdateCultures={editor.updateCultures}
+          onAddCustomGovernmentType={editor.addCustomGovernmentType}
+          onAddCustomReligionType={editor.addCustomReligionType}
+          onAddCustomCultureType={editor.addCustomCultureType}
           onDeleteTradeRoute={(id) =>
             editor.commitMapChange(
               (prev) => ({
@@ -420,9 +463,58 @@ export function App() {
             editor.setTool('city');
           }}
           onOpenCityTrade={(cityId) => setTradeModalCityId(cityId)}
+          onOpenCityBlueprint={(cityId) => setBlueprintCityId(cityId)}
+          onOpenLore={(kind, id) => setLoreModal({ kind, id })}
           onClose={() => setShowEconomyModal(false)}
         />
       )}
+
+      {loreModal && (
+        <EntityLoreModal
+          kind={loreModal.kind}
+          entityId={loreModal.id}
+          map={editor.map}
+          onUpdateKingdoms={editor.updateKingdoms}
+          onUpdateReligions={editor.updateReligions}
+          onUpdateCultures={editor.updateCultures}
+          onAddCustomGovernmentType={editor.addCustomGovernmentType}
+          onAddCustomReligionType={editor.addCustomReligionType}
+          onAddCustomCultureType={editor.addCustomCultureType}
+          onClose={() => setLoreModal(null)}
+        />
+      )}
+
+      {showTimelineModal && (
+        <TimelineModal
+          map={editor.map}
+          timeline={editor.map.timeline ?? createInitialTimeline(editor.map)}
+          onSwitchEra={(eraId) => {
+            editor.switchEra(eraId);
+            showToast('สลับยุคสมัยบนแผนที่แล้ว');
+          }}
+          onCreateEra={(name, year, summary) => {
+            editor.createEraFromCurrent(name, year, summary);
+            showToast(`สร้างยุค "${name}" แล้ว`);
+          }}
+          onUpdateTimeline={editor.updateTimelineMeta}
+          onClose={() => setShowTimelineModal(false)}
+        />
+      )}
+
+      {blueprintCityId &&
+        (() => {
+          const bpCity = editor.map.cities.find((c) => c.id === blueprintCityId);
+          if (!bpCity) return null;
+          return (
+            <CityBlueprintModal
+              city={bpCity}
+              map={editor.map}
+              onUpdateCity={editor.updateCity}
+              onNotify={showToast}
+              onClose={() => setBlueprintCityId(null)}
+            />
+          );
+        })()}
 
       {tradeModalCityId && editor.map.cities.some((c) => c.id === tradeModalCityId) && (
         <CityTradeModal

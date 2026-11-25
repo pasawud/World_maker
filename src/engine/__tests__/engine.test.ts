@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { getFeatureMeta } from '../../data/features';
-import { BiomeId } from '../../types/map';
+import { BiomeId, City } from '../../types/map';
 import {
   autoDetectCliffsFromElevation,
   getCliffEdges,
   syncShallowWater,
 } from '../cliffs';
+import { generateCityPlan, createDefaultCityProfile } from '../cityGenerator';
 import {
   computeRealDimensions,
   cubeToOffset,
@@ -27,6 +28,13 @@ import {
   generateTerritoriesFromCities,
 } from '../politics';
 import { parseMapFromJson, resizeMap, serializeMapToJson } from '../serialization';
+import {
+  createInitialTimeline,
+  createNewEraFromCurrent,
+  decodeRle,
+  encodeRle,
+  switchMapToEra,
+} from '../timeline';
 import { computeCityTradeOverview, estimateRouteTradeValue } from '../trade';
 import {
   DEFAULT_GEOGRAPHY_CONFIG,
@@ -636,5 +644,139 @@ describe('Culture System, Customization & City Trade Overview', () => {
     expect(overview!.suggestions).toHaveLength(1);
     expect(overview!.suggestions[0].partner.id).toBe('c3');
     expect(overview!.suggestions[0].totalMatches).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('Deep Lore Custom Types, Timeline Snapshots & City Blueprint Generator', () => {
+  it('round-trips custom government/religion/culture types and deep lore details', () => {
+    const map = generateWorld(40, 30, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.customGovernmentTypes = [{ id: 'gov_mage_council', label: 'สภาจอมเวท' }];
+    map.customReligionTypes = [{ id: 'rel_machine', label: 'ลัทธิจักรกลศักดิ์สิทธิ์' }];
+    map.customCultureTypes = [{ id: 'cult_sky', label: 'อารยธรรมลอยฟ้า' }];
+
+    map.kingdoms[0].government = 'gov_mage_council';
+    map.kingdoms[0].details = {
+      rulerTitle: 'อัครมหาจอมเวท',
+      rulerName: 'เซริน',
+      succession: 'เลือกตั้งโดยสภา',
+      powerStructure: 'สภาจอมเวทเจ็ดหอคอย',
+      laws: ['ห้ามใช้ศาสตร์ต้องห้ามในเมือง'],
+      motto: 'ปัญญาเหนือคมดาบ',
+    };
+    map.religionList[0].type = 'rel_machine';
+    map.religionList[0].details = {
+      deities: [{ id: 'd1', name: 'ฟันเฟืองนิรันดร์', domain: 'กลไก', symbol: '⚙️' }],
+      tenets: ['จงสร้างและซ่อมแซม'],
+      taboos: ['ห้ามปล่อยให้สนิมกัดกร่อน'],
+      clergyStructure: 'วิศวกรนักบวช',
+      rituals: ['พิธีหยอดน้ำมันปฐมฤกษ์'],
+      holyCityIds: map.cities[0] ? [map.cities[0].id] : [],
+      sacredText: 'ตำราแห่งเฟืองทอง',
+    };
+
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+
+    expect(restored.customGovernmentTypes).toHaveLength(1);
+    expect(restored.customReligionTypes).toHaveLength(1);
+    expect(restored.customCultureTypes).toHaveLength(1);
+    expect(restored.kingdoms[0].details?.rulerName).toBe('เซริน');
+    expect(restored.religionList[0].details?.deities[0].name).toBe('ฟันเฟืองนิรันดร์');
+  });
+
+  it('compresses grids with RLE and switches timeline era snapshots without losing state', () => {
+    const sample = ['north', 'north', 'north', '', '', 'central', 'central', ''];
+    const rle = encodeRle(sample);
+    expect(rle).toEqual([
+      ['north', 3],
+      ['', 2],
+      ['central', 2],
+      ['', 1],
+    ]);
+    expect(decodeRle(rle, sample.length)).toEqual(sample);
+    expect(encodeRle([])).toEqual([]);
+
+    const map = generateWorld(30, 24, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    const era1Idx = hexIndex(5, 5, map.width);
+    map.territories[era1Idx] = map.kingdoms[0].id;
+    map.timeline = createInitialTimeline(map);
+    const era1Id = map.timeline.activeEraId;
+
+    // Advance to Era 2 and mutate territory + city count
+    const era2Map = createNewEraFromCurrent(map, 'ยุคจักรวรรดิขยายตัว', 250);
+    const era2Id = era2Map.timeline!.activeEraId;
+    expect(era2Id).not.toBe(era1Id);
+    era2Map.territories[era1Idx] = map.kingdoms[1].id;
+    era2Map.cities = [];
+
+    // Switch back to Era 1 -> original territory and cities return intact
+    const backToEra1 = switchMapToEra(era2Map, era1Id);
+    expect(backToEra1.territories[era1Idx]).toBe(map.kingdoms[0].id);
+    expect(backToEra1.cities.length).toBe(map.cities.length);
+
+    // Switch forward to Era 2 again -> Era 2 mutations remain preserved
+    const backToEra2 = switchMapToEra(backToEra1, era2Id);
+    expect(backToEra2.territories[era1Idx]).toBe(map.kingdoms[1].id);
+    expect(backToEra2.cities.length).toBe(0);
+  });
+
+  it('generates geography-aware 2D city plans (coastal harbor, river bridge, cliff, capital walls) and round-trips JSON', () => {
+    const w = 16;
+    const h = 14;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.18);
+    map.features = new Array<string>(w * h).fill('');
+    map.rivers = [
+      {
+        id: 'rv1',
+        source: 'manual',
+        points: [
+          { q: 5, r: 5, flux: 20 },
+          { q: 6, r: 6, flux: 24 },
+          { q: 7, r: 7, flux: 28 },
+        ],
+      },
+    ];
+
+    // Place ocean east of city (6, 6) -> (7, 6) and cliff north-west -> (5, 5)
+    map.biomes[hexIndex(7, 6, w)] = BiomeId.SHALLOW_WATER;
+    map.features[hexIndex(5, 5, w)] = 'cliff';
+
+    const capital: City = {
+      id: 'cap1',
+      name: 'นครหลวงออร์เรียน',
+      q: 6,
+      r: 6,
+      tier: 'capital',
+      population: 90000,
+      kingdomId: map.kingdoms[0].id,
+      religionId: map.religionList[0].id,
+      cultureId: map.cultureList[0].id,
+      producedGoods: ['wheat', 'wine'],
+      demandedGoods: ['iron'],
+      notes: '',
+    };
+    const profile = createDefaultCityProfile(map, capital);
+    const plan = generateCityPlan(map, { ...capital, profile });
+
+    expect(plan.waterSide).toBe('east');
+    expect(plan.hasRiver).toBe(true);
+    expect(plan.hasCliff).toBe(true);
+    expect(plan.hasWalls).toBe(true);
+    expect(plan.wallStyle).toBe('citadel_double');
+    expect(plan.districts.some((d) => d.type === 'harbor')).toBe(true);
+    expect(plan.districts.some((d) => d.type === 'citadel')).toBe(true);
+    expect(plan.districts.some((d) => d.type === 'temple')).toBe(true);
+    expect(plan.roads.some((r) => r.kind === 'bridge')).toBe(true);
+
+    capital.plan = plan;
+    capital.profile = profile;
+    map.cities = [capital];
+
+    const restored = parseMapFromJson(serializeMapToJson(map));
+    expect(restored.cities[0].plan?.waterSide).toBe('east');
+    expect(restored.cities[0].plan?.districts.length).toBe(plan.districts.length);
+    expect(restored.cities[0].profile?.defenseRating).toBe(9);
   });
 });

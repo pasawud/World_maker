@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Clock,
   Download,
   Eye,
   Grid3X3,
@@ -18,6 +19,8 @@ interface SubBarProps {
   onChangeOverlay: (o: ClimateOverlay) => void;
   layers: LayerVisibility;
   onToggleLayer: (key: keyof LayerVisibility) => void;
+  showTimelineBar: boolean;
+  onToggleTimelineBar: () => void;
   onOpenSizeModal: () => void;
   onOpenEconomyModal: () => void;
   onOpenCustomModal: () => void;
@@ -40,6 +43,8 @@ export const SubBar: React.FC<SubBarProps> = ({
   onChangeOverlay,
   layers,
   onToggleLayer,
+  showTimelineBar,
+  onToggleTimelineBar,
   onOpenSizeModal,
   onOpenEconomyModal,
   onOpenCustomModal,
@@ -136,6 +141,19 @@ export const SubBar: React.FC<SubBarProps> = ({
           <span className="text-sky-200">
             {Math.round(dims.widthKm).toLocaleString()} × {Math.round(dims.heightKm).toLocaleString()} กม.
           </span>
+        </button>
+
+        <button
+          onClick={onToggleTimelineBar}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
+            showTimelineBar
+              ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-medium'
+              : 'bg-[#1b2533] hover:bg-[#243144] border-slate-700/80 text-slate-200'
+          }`}
+          title="เปิด/ปิดแถบ Timeline ประวัติศาสตร์ยุคสมัย"
+        >
+          <Clock className="w-3 h-3 text-amber-400" />
+          <span>Timeline</span>
         </button>
 
         <button
