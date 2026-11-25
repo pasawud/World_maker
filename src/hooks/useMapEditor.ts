@@ -15,6 +15,7 @@ import {
 } from '../engine/hexMath';
 import { generateRiversAuto } from '../engine/hydrology';
 import {
+  generateCulturesFromCities,
   generateReligionsFromCities,
   generateTerritoriesFromCities,
 } from '../engine/politics';
@@ -29,14 +30,17 @@ import {
   BiomeId,
   City,
   ClimateOverlay,
+  Culture,
   CustomBiome,
   CustomPoiType,
   GeographyConfig,
   HexCoord,
   HexMapData,
+  Kingdom,
   LabelStyle,
   LayerVisibility,
   PoiType,
+  Religion,
   RoadType,
   ToolMode,
   TradeMode,
@@ -82,6 +86,10 @@ export function useMapEditor() {
     () => map.religionList[0]?.id ?? 'solaris'
   );
   const [religionSubTool, setReligionSubTool] = useState<'brush' | 'fill' | 'erase'>('brush');
+  const [activeCultureId, setActiveCultureId] = useState<string>(
+    () => map.cultureList?.[0]?.id ?? 'valerian'
+  );
+  const [cultureSubTool, setCultureSubTool] = useState<'brush' | 'fill' | 'erase'>('brush');
 
   const [layers, setLayers] = useState<LayerVisibility>({
     grid: false,
@@ -90,6 +98,7 @@ export function useMapEditor() {
     territories: true,
     borders: true,
     religions: false,
+    cultures: false,
     features: true,
     routes: true,
     rivers: true,
@@ -151,6 +160,7 @@ export function useMapEditor() {
         features: [...cur.features],
         territories: [...cur.territories],
         religions: [...cur.religions],
+        cultures: [...(cur.cultures ?? [])],
       };
       return cur;
     });
@@ -248,6 +258,7 @@ export function useMapEditor() {
         const nextElev = [...prev.elevation];
         const nextTerr = [...prev.territories];
         const nextRel = [...prev.religions];
+        const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
         const nextFeat = [...prev.features];
         let changed = false;
         const changedHexes: HexCoord[] = [];
@@ -259,6 +270,7 @@ export function useMapEditor() {
             if (meta.isWater) {
               nextTerr[idx] = '';
               nextRel[idx] = '';
+              nextCult[idx] = '';
             }
             // Clear incompatible feature if land<->water flipped
             if (nextFeat[idx]) {
@@ -295,6 +307,7 @@ export function useMapEditor() {
             elevation: synced.elevation,
             territories: nextTerr,
             religions: nextRel,
+            cultures: nextCult,
             features: synced.features,
           };
         }
@@ -305,6 +318,7 @@ export function useMapEditor() {
           elevation: nextElev,
           territories: nextTerr,
           religions: nextRel,
+          cultures: nextCult,
           features: nextFeat,
         };
       });
@@ -363,6 +377,31 @@ export function useMapEditor() {
     [activeReligionId, brushSize, markHexesDirty]
   );
 
+  const paintCultureAt = useCallback(
+    (q: number, r: number, erase = false) => {
+      setMap((prev) => {
+        const brush = getHexBrush(q, r, brushSize - 1, prev.width, prev.height);
+        const targetId = erase ? '' : activeCultureId;
+        const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
+        let changed = false;
+        const changedHexes: HexCoord[] = [];
+        for (const h of brush) {
+          const idx = hexIndex(h.q, h.r, prev.width);
+          if (!erase && isWaterBiome(prev.biomes[idx], prev.customBiomes)) continue;
+          if (nextCult[idx] !== targetId) {
+            nextCult[idx] = targetId;
+            changed = true;
+            changedHexes.push(h);
+          }
+        }
+        if (!changed) return prev;
+        markHexesDirty(changedHexes);
+        return { ...prev, cultures: nextCult };
+      });
+    },
+    [activeCultureId, brushSize, markHexesDirty]
+  );
+
   const endStroke = useCallback(() => {
     const snap = strokeSnapshotRef.current;
     strokeSnapshotRef.current = null;
@@ -372,7 +411,8 @@ export function useMapEditor() {
         cur.biomes.some((v, i) => v !== snap.biomes[i]) ||
         cur.features.some((v, i) => v !== snap.features[i]) ||
         cur.territories.some((v, i) => v !== snap.territories[i]) ||
-        cur.religions.some((v, i) => v !== snap.religions[i]);
+        cur.religions.some((v, i) => v !== snap.religions[i]) ||
+        (cur.cultures ?? []).some((v, i) => v !== (snap.cultures ?? [])[i]);
       if (diff) {
         setUndoStack((u) => [...u.slice(-(MAX_HISTORY - 1)), snap]);
         setRedoStack([]);
@@ -391,6 +431,7 @@ export function useMapEditor() {
         const nextElev = [...prev.elevation];
         const nextTerr = [...prev.territories];
         const nextRel = [...prev.religions];
+        const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
         const nextFeat = [...prev.features];
         for (const h of targets) {
           const idx = hexIndex(h.q, h.r, prev.width);
@@ -399,6 +440,7 @@ export function useMapEditor() {
           if (meta.isWater) {
             nextTerr[idx] = '';
             nextRel[idx] = '';
+            nextCult[idx] = '';
           }
           if (nextFeat[idx]) {
             const fm = getFeatureMeta(nextFeat[idx]);
@@ -430,6 +472,7 @@ export function useMapEditor() {
             elevation: synced.elevation,
             territories: nextTerr,
             religions: nextRel,
+            cultures: nextCult,
             features: synced.features,
           };
         }
@@ -440,6 +483,7 @@ export function useMapEditor() {
           elevation: nextElev,
           territories: nextTerr,
           religions: nextRel,
+          cultures: nextCult,
           features: nextFeat,
         };
       });
@@ -499,6 +543,33 @@ export function useMapEditor() {
     [activeReligionId, commitMapChange, markHexesDirty]
   );
 
+  const floodFillCultureAt = useCallback(
+    (q: number, r: number, erase = false) => {
+      commitMapChange((prev) => {
+        if (!erase && isWaterHex(prev, q, r)) return prev;
+        const baseCultures = prev.cultures ?? new Array<string>(prev.width * prev.height).fill('');
+        const targets = floodFillHexes(
+          baseCultures,
+          prev.width,
+          prev.height,
+          q,
+          r,
+          8000,
+          (idx) => !isWaterBiome(prev.biomes[idx], prev.customBiomes)
+        );
+        if (targets.length === 0) return prev;
+        const nextCult = [...baseCultures];
+        const val = erase ? '' : activeCultureId;
+        for (const h of targets) {
+          nextCult[hexIndex(h.q, h.r, prev.width)] = val;
+        }
+        markHexesDirty(targets);
+        return { ...prev, cultures: nextCult };
+      });
+    },
+    [activeCultureId, commitMapChange, markHexesDirty]
+  );
+
   const undo = useCallback(() => {
     setUndoStack((u) => {
       if (u.length === 0) return u;
@@ -549,6 +620,7 @@ export function useMapEditor() {
         population: tierInfo.defaultPop,
         kingdomId: activeKingdomId || map.kingdoms[0]?.id || 'independent',
         religionId: activeReligionId || map.religionList[0]?.id || 'solaris',
+        cultureId: activeCultureId || map.cultureList?.[0]?.id || 'valerian',
         producedGoods,
         demandedGoods,
         notes: '',
@@ -560,7 +632,7 @@ export function useMapEditor() {
       );
       setSelectedCityId(newCity.id);
     },
-    [activeKingdomId, activeReligionId, commitMapChange, map]
+    [activeCultureId, activeKingdomId, activeReligionId, commitMapChange, map]
   );
 
   const updateCity = useCallback(
@@ -594,6 +666,44 @@ export function useMapEditor() {
     [commitMapChange, selectedCityId, tradeStartCityId]
   );
 
+  const createTradeRouteBetweenCities = useCallback(
+    (fromCityId: string, toCityId: string, mode: TradeMode): { error?: string } => {
+      if (fromCityId === toCityId) return {};
+      const from = map.cities.find((c) => c.id === fromCityId);
+      const to = map.cities.find((c) => c.id === toCityId);
+      if (!from || !to) return { error: 'ไม่พบเมืองต้นทางหรือปลายทาง' };
+
+      const path = findHexPath(map, from, to, mode);
+      if (!path.reachable) {
+        return {
+          error:
+            mode === 'sea'
+              ? 'เส้นทางเดินเรือต้องเชื่อมระหว่างเมืองติดทะเล/ท่าเรือที่ไม่มีหน้าผาเท่านั้น (ลองใช้โหมด "ผสม" สำหรับเมืองในแผ่นดิน)'
+              : 'ไม่สามารถคำนวณเส้นทางระหว่างสองเมืองนี้ได้ในโหมดที่เลือก',
+        };
+      }
+      const speed = mode === 'sea' ? 140 : mode === 'mixed' ? 55 : 25;
+      const matched = from.producedGoods.filter((gid) => to.demandedGoods.includes(gid));
+      const goodIds = matched.length > 0 ? matched.slice(0, 3) : from.producedGoods.slice(0, 2);
+      const newRoute = {
+        id: `route_${Date.now().toString(36)}`,
+        fromCityId: from.id,
+        toCityId: to.id,
+        goodIds,
+        mode,
+        hexes: path.hexes,
+        distanceKm: Math.round(path.distanceKm),
+        travelDays: Number(Math.max(0.5, path.distanceKm / speed).toFixed(1)),
+      };
+      commitMapChange(
+        (prev) => ({ ...prev, tradeRoutes: [...prev.tradeRoutes, newRoute] }),
+        []
+      );
+      return {};
+    },
+    [commitMapChange, map]
+  );
+
   const handleTradeCityClick = useCallback(
     (q: number, r: number): { error?: string } => {
       const clicked = map.cities.find((c) => hexDistance(c, { q, r }) <= 1);
@@ -606,39 +716,11 @@ export function useMapEditor() {
         setTradeStartCityId(null);
         return {};
       }
-      const from = map.cities.find((c) => c.id === tradeStartCityId);
-      if (!from) {
-        setTradeStartCityId(null);
-        return {};
-      }
-      const path = findHexPath(map, from, clicked, tradeMode);
-      if (!path.reachable) {
-        return {
-          error:
-            tradeMode === 'sea'
-              ? 'เส้นทางเดินเรือต้องเชื่อมระหว่างเมืองติดทะเล/ท่าเรือเท่านั้น (ลองใช้โหมด "ผสม" สำหรับเมืองในแผ่นดิน)'
-              : 'ไม่สามารถคำนวณเส้นทางระหว่างสองเมืองนี้ได้ในโหมดที่เลือก',
-        };
-      }
-      const speed = tradeMode === 'sea' ? 140 : tradeMode === 'mixed' ? 55 : 25;
-      const newRoute = {
-        id: `route_${Date.now().toString(36)}`,
-        fromCityId: from.id,
-        toCityId: clicked.id,
-        goodIds: from.producedGoods.slice(0, 2),
-        mode: tradeMode,
-        hexes: path.hexes,
-        distanceKm: Math.round(path.distanceKm),
-        travelDays: Number(Math.max(0.5, path.distanceKm / speed).toFixed(1)),
-      };
-      commitMapChange(
-        (prev) => ({ ...prev, tradeRoutes: [...prev.tradeRoutes, newRoute] }),
-        []
-      );
-      setTradeStartCityId(null);
-      return {};
+      const res = createTradeRouteBetweenCities(tradeStartCityId, clicked.id, tradeMode);
+      if (!res.error) setTradeStartCityId(null);
+      return res;
     },
-    [commitMapChange, map, tradeMode, tradeStartCityId]
+    [createTradeRouteBetweenCities, map.cities, tradeMode, tradeStartCityId]
   );
 
   const runAutoRivers = useCallback(
@@ -672,6 +754,70 @@ export function useMapEditor() {
     }));
   }, [commitMapChange]);
 
+  const runAutoCultures = useCallback(() => {
+    commitMapChange((prev) => ({
+      ...prev,
+      cultures: generateCulturesFromCities(prev),
+    }));
+  }, [commitMapChange]);
+
+  const updateKingdoms = useCallback(
+    (kingdoms: Kingdom[]) => {
+      const validIds = new Set(kingdoms.map((k) => k.id));
+      const fallbackId = kingdoms[0]?.id ?? '';
+      commitMapChange((prev) => ({
+        ...prev,
+        kingdoms,
+        territories: prev.territories.map((tid) => (tid && !validIds.has(tid) ? '' : tid)),
+        cities: prev.cities.map((c) =>
+          c.kingdomId && !validIds.has(c.kingdomId) ? { ...c, kingdomId: fallbackId } : c
+        ),
+      }));
+      if (activeKingdomId && !validIds.has(activeKingdomId)) {
+        setActiveKingdomId(fallbackId);
+      }
+    },
+    [activeKingdomId, commitMapChange]
+  );
+
+  const updateReligions = useCallback(
+    (religionList: Religion[]) => {
+      const validIds = new Set(religionList.map((r) => r.id));
+      const fallbackId = religionList[0]?.id ?? '';
+      commitMapChange((prev) => ({
+        ...prev,
+        religionList,
+        religions: prev.religions.map((rid) => (rid && !validIds.has(rid) ? '' : rid)),
+        cities: prev.cities.map((c) =>
+          c.religionId && !validIds.has(c.religionId) ? { ...c, religionId: fallbackId } : c
+        ),
+      }));
+      if (activeReligionId && !validIds.has(activeReligionId)) {
+        setActiveReligionId(fallbackId);
+      }
+    },
+    [activeReligionId, commitMapChange]
+  );
+
+  const updateCultures = useCallback(
+    (cultureList: Culture[]) => {
+      const validIds = new Set(cultureList.map((c) => c.id));
+      const fallbackId = cultureList[0]?.id ?? '';
+      commitMapChange((prev) => ({
+        ...prev,
+        cultureList,
+        cultures: (prev.cultures ?? []).map((cid) => (cid && !validIds.has(cid) ? '' : cid)),
+        cities: prev.cities.map((c) =>
+          c.cultureId && !validIds.has(c.cultureId) ? { ...c, cultureId: fallbackId } : c
+        ),
+      }));
+      if (activeCultureId && !validIds.has(activeCultureId)) {
+        setActiveCultureId(fallbackId);
+      }
+    },
+    [activeCultureId, commitMapChange]
+  );
+
   const runGenerateWorld = useCallback(
     (nextConfig?: Partial<GeographyConfig>) => {
       commitMapChange((prev) => {
@@ -686,6 +832,7 @@ export function useMapEditor() {
           goods: prev.goods,
           kingdoms: prev.kingdoms,
           religionList: prev.religionList,
+          cultureList: prev.cultureList,
           customBiomes: prev.customBiomes,
           customPoiTypes: prev.customPoiTypes,
         };
@@ -752,6 +899,7 @@ export function useMapEditor() {
         features: new Array<string>(total).fill(''),
         territories: new Array<string>(total).fill(''),
         religions: new Array<string>(total).fill(''),
+        cultures: new Array<string>(total).fill(''),
         rivers: [],
         cities: [],
         roads: [],
@@ -898,6 +1046,10 @@ export function useMapEditor() {
     setActiveReligionId,
     religionSubTool,
     setReligionSubTool,
+    activeCultureId,
+    setActiveCultureId,
+    cultureSubTool,
+    setCultureSubTool,
     layers,
     toggleLayer,
     selectedCityId,
@@ -914,17 +1066,24 @@ export function useMapEditor() {
     paintTerrainAt,
     paintTerritoryAt,
     paintReligionAt,
+    paintCultureAt,
     endStroke,
     floodFillAt,
     floodFillTerritoryAt,
     floodFillReligionAt,
+    floodFillCultureAt,
     placeOrSelectCityAt,
     updateCity,
     deleteCity,
+    createTradeRouteBetweenCities,
     handleTradeCityClick,
     runAutoRivers,
     runAutoTerritories,
     runAutoReligions,
+    runAutoCultures,
+    updateKingdoms,
+    updateReligions,
+    updateCultures,
     runGenerateWorld,
     runRecomputeClimateBiomes,
     runSyncShallowWater,

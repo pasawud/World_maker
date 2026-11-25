@@ -1,7 +1,11 @@
-import { DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
+import { DEFAULT_CULTURES, DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
 import { BiomeId, City, HexMapData, Kingdom } from '../types/map';
 import { findHexPath, hexIndex } from './hexMath';
-import { generateReligionsFromCities, generateTerritoriesFromCities } from './politics';
+import {
+  generateCulturesFromCities,
+  generateReligionsFromCities,
+  generateTerritoriesFromCities,
+} from './politics';
 import { DEFAULT_GEOGRAPHY_CONFIG, generateWorld } from './worldGenerator';
 
 const AUTOSAVE_KEY = 'hex-worldmaker:autosave:v1';
@@ -87,6 +91,11 @@ export function parseMapFromJson(raw: string): HexMapData {
       ? (obj.religionList as HexMapData['religionList'])
       : DEFAULT_RELIGIONS.map((r) => ({ ...r }));
 
+  const cultureList =
+    Array.isArray(obj.cultureList) && obj.cultureList.length > 0
+      ? (obj.cultureList as HexMapData['cultureList'])
+      : DEFAULT_CULTURES.map((c) => ({ ...c }));
+
   const rawKingdoms =
     Array.isArray(obj.kingdoms) && obj.kingdoms.length > 0
       ? (obj.kingdoms as Partial<Kingdom>[])
@@ -109,6 +118,7 @@ export function parseMapFromJson(raw: string): HexMapData {
     population: Number(c.population) || 5000,
     kingdomId: c.kingdomId || kingdoms[0].id,
     religionId: c.religionId || religionList[0].id,
+    cultureId: c.cultureId || cultureList[0].id,
     producedGoods: Array.isArray(c.producedGoods) ? c.producedGoods : [],
     demandedGoods: Array.isArray(c.demandedGoods) ? c.demandedGoods : [],
     notes: c.notes || '',
@@ -151,6 +161,19 @@ export function parseMapFromJson(raw: string): HexMapData {
         roads,
       });
 
+  const hasCultures = Array.isArray(obj.cultures) && obj.cultures.length === expectedLen;
+  const cultures = hasCultures
+    ? ensureStringArray(obj.cultures, '')
+    : generateCulturesFromCities({
+        width,
+        height,
+        biomes,
+        customBiomes,
+        features,
+        cities,
+        roads,
+      });
+
   return {
     version: 1,
     id: typeof obj.id === 'string' && obj.id ? obj.id : `map_${Date.now().toString(36)}`,
@@ -177,10 +200,12 @@ export function parseMapFromJson(raw: string): HexMapData {
     features,
     territories,
     religions,
+    cultures,
     rivers: Array.isArray(obj.rivers) ? (obj.rivers as HexMapData['rivers']) : [],
     cities,
     kingdoms,
     religionList,
+    cultureList,
     goods:
       Array.isArray(obj.goods) && obj.goods.length > 0
         ? (obj.goods as HexMapData['goods'])
@@ -214,6 +239,7 @@ export function resizeMap(
       goods: map.goods,
       kingdoms: map.kingdoms,
       religionList: map.religionList,
+      cultureList: map.cultureList,
       customBiomes: map.customBiomes,
       customPoiTypes: map.customPoiTypes,
     };
@@ -227,6 +253,7 @@ export function resizeMap(
   const features = new Array<string>(total).fill('');
   const territories = new Array<string>(total).fill('');
   const religions = new Array<string>(total).fill('');
+  const cultures = new Array<string>(total).fill('');
 
   const copyW = Math.min(map.width, safeW);
   const copyH = Math.min(map.height, safeH);
@@ -242,6 +269,7 @@ export function resizeMap(
       features[newIdx] = map.features?.[oldIdx] ?? '';
       territories[newIdx] = map.territories?.[oldIdx] ?? '';
       religions[newIdx] = map.religions?.[oldIdx] ?? '';
+      cultures[newIdx] = map.cultures?.[oldIdx] ?? '';
     }
   }
 
@@ -277,6 +305,7 @@ export function resizeMap(
     features,
     territories,
     religions,
+    cultures,
     rivers,
     cities,
     roads,

@@ -1,5 +1,7 @@
 import {
   CityTier,
+  Culture,
+  CultureType,
   CustomPoiType,
   GovernmentType,
   Kingdom,
@@ -95,6 +97,59 @@ export const DEFAULT_RELIGIONS: Religion[] = [
     symbol: '✨',
     type: 'arcane',
     description: 'แสวงหาสัจธรรมผ่านดวงดาวและมานา',
+  },
+];
+
+export const CULTURE_TYPES: { id: CultureType; label: string }[] = [
+  { id: 'agrarian', label: 'เกษตรกรรม / ลุ่มน้ำ' },
+  { id: 'maritime', label: 'ชาวทะเล / นักเดินเรือ' },
+  { id: 'nomadic', label: 'เร่ร่อน / ทุ่งกว้าง' },
+  { id: 'highland', label: 'ชาวขุนเขา / ที่ราบสูง' },
+  { id: 'mercantile', label: 'พ่อค้า / นครการค้า' },
+  { id: 'scholarly', label: 'ปราชญ์ / อารยธรรมโบราณ' },
+  { id: 'martial', label: 'นักรบ / ชายแดน' },
+];
+
+export const DEFAULT_CULTURES: Culture[] = [
+  {
+    id: 'nordic',
+    name: 'ชาวอุดรผู้แกร่งกล้า',
+    color: '#38bdf8',
+    symbol: '🛡️',
+    type: 'martial',
+    description: 'วัฒนธรรมนักรบแห่งแดนหนาวและป้อมปราการ',
+  },
+  {
+    id: 'valerian',
+    name: 'อารยธรรมลุ่มน้ำหลวง',
+    color: '#fbbf24',
+    symbol: '🏛️',
+    type: 'agrarian',
+    description: 'ผู้รุ่งเรืองด้านเกษตรกรรม สถาปัตยกรรม และการปกครอง',
+  },
+  {
+    id: 'thalassian',
+    name: 'ชาวนาวีแห่งท้องทะเล',
+    color: '#2dd4bf',
+    symbol: '⚓',
+    type: 'maritime',
+    description: 'นักเดินเรือ พ่อค้าทางทะเล และชาวหมู่เกาะ',
+  },
+  {
+    id: 'sunstrider',
+    name: 'ชนเผ่าทะเลทรายสุริยัน',
+    color: '#fb923c',
+    symbol: '🐪',
+    type: 'nomadic',
+    description: 'กองคาราวานข้ามทะเลทรายและทุ่งสะวันนา',
+  },
+  {
+    id: 'highborn',
+    name: 'ชาวศิลาแห่งขุนเขา',
+    color: '#e879f9',
+    symbol: '⛰️',
+    type: 'highland',
+    description: 'ช่างตีเหล็กและผู้พิทักษ์ป้อมผาสูง',
   },
 ];
 

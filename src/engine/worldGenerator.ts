@@ -1,4 +1,4 @@
-import { DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
+import { DEFAULT_CULTURES, DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
 import { getFeatureMeta } from '../data/features';
 import {
   BiomeId,
@@ -18,7 +18,11 @@ import {
 } from './hexMath';
 import { generateRiversAuto } from './hydrology';
 import { createNoise2D, mulberry32 } from './noise';
-import { generateReligionsFromCities, generateTerritoriesFromCities } from './politics';
+import {
+  generateCulturesFromCities,
+  generateReligionsFromCities,
+  generateTerritoriesFromCities,
+} from './politics';
 
 export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   seed: 42081,
@@ -569,10 +573,12 @@ export function generateWorld(
     features: waterSync.features,
     territories: new Array<string>(total).fill(''),
     religions: new Array<string>(total).fill(''),
+    cultures: new Array<string>(total).fill(''),
     rivers: hydro.rivers,
     cities: [],
     kingdoms: DEFAULT_KINGDOMS.map((k) => ({ ...k })),
     religionList: DEFAULT_RELIGIONS.map((r) => ({ ...r })),
+    cultureList: DEFAULT_CULTURES.map((c) => ({ ...c })),
     goods: DEFAULT_GOODS.map((g) => ({ ...g })),
     customBiomes: [],
     customPoiTypes: [],
@@ -641,6 +647,7 @@ export function generateWorld(
       population: pop,
       kingdomId: map.kingdoms[idx % map.kingdoms.length].id,
       religionId: map.religionList[idx % map.religionList.length].id,
+      cultureId: map.cultureList[idx % map.cultureList.length].id,
       producedGoods,
       demandedGoods,
       notes: 'ตั้งถิ่นฐานอัตโนมัติตามแหล่งน้ำและภูมิศาสตร์',
@@ -671,9 +678,10 @@ export function generateWorld(
   }
   map.tradeRoutes = routes;
 
-  // Generate starter territories & religions from cities
+  // Generate starter territories, religions & cultures from cities
   map.territories = generateTerritoriesFromCities(map);
   map.religions = generateReligionsFromCities(map);
+  map.cultures = generateCulturesFromCities(map);
 
   return map;
 }

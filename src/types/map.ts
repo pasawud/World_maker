@@ -86,6 +86,24 @@ export interface Religion {
   description?: string;
 }
 
+export type CultureType =
+  | 'agrarian'
+  | 'maritime'
+  | 'nomadic'
+  | 'highland'
+  | 'mercantile'
+  | 'scholarly'
+  | 'martial';
+
+export interface Culture {
+  id: string;
+  name: string;
+  color: string;
+  symbol: string;
+  type: CultureType;
+  description?: string;
+}
+
 export type LandmassType =
   | 'continent'
   | 'twin'
@@ -137,6 +155,7 @@ export interface City {
   population: number;
   kingdomId: string;
   religionId: string;
+  cultureId: string;
   producedGoods: string[];
   demandedGoods: string[];
   notes: string;
@@ -218,10 +237,12 @@ export interface HexMapData {
   features: string[]; // length = width * height ('' = none)
   territories: string[]; // length = width * height ('' = unclaimed or kingdomId)
   religions: string[]; // length = width * height ('' = none or religionId)
+  cultures: string[]; // length = width * height ('' = none or cultureId)
   rivers: RiverPath[];
   cities: City[];
   kingdoms: Kingdom[];
   religionList: Religion[];
+  cultureList: Culture[];
   goods: TradeGood[];
   customBiomes: CustomBiome[];
   customPoiTypes: CustomPoiType[];
@@ -238,6 +259,7 @@ export type ToolMode =
   | 'city'
   | 'territory'
   | 'religion'
+  | 'culture'
   | 'road'
   | 'trade'
   | 'measure'
@@ -248,6 +270,7 @@ export type ClimateOverlay =
   | 'none'
   | 'political'
   | 'religion'
+  | 'culture'
   | 'elevation'
   | 'temperature'
   | 'moisture';
@@ -259,6 +282,7 @@ export interface LayerVisibility {
   territories: boolean;
   borders: boolean;
   religions: boolean;
+  cultures: boolean;
   features: boolean;
   routes: boolean;
   rivers: boolean;

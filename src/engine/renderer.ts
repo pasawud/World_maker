@@ -1,6 +1,6 @@
 import { getAllBiomes, getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
-import { getAllPoiTypes, GOVERNMENT_TYPES } from '../data/goods';
+import { CULTURE_TYPES, getAllPoiTypes, GOVERNMENT_TYPES } from '../data/goods';
 import {
   BiomeDetailStyle,
   BiomeId,
@@ -537,6 +537,7 @@ export class ChunkedMapRenderer {
 
     const kingdomColorMap = new Map(map.kingdoms.map((k) => [k.id, k.color]));
     const religionColorMap = new Map(map.religionList.map((r) => [r.id, r.color]));
+    const cultureColorMap = new Map((map.cultureList ?? []).map((c) => [c.id, c.color]));
 
     for (let r = startR; r < endR; r++) {
       for (let q = startQ; q < endQ; q++) {
@@ -569,7 +570,12 @@ export class ChunkedMapRenderer {
         ctx.fillStyle = fill;
         ctx.fill();
 
-        if (overlay === 'none' || overlay === 'political' || overlay === 'religion') {
+        if (
+          overlay === 'none' ||
+          overlay === 'political' ||
+          overlay === 'religion' ||
+          overlay === 'culture'
+        ) {
           if (biomeId === BiomeId.SHALLOW_WATER) {
             const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
             let touchesNonCliffLand = false;
@@ -674,6 +680,35 @@ export class ChunkedMapRenderer {
           }
         }
 
+        // Culture tint & dotted borders
+        const cultId = map.cultures?.[idx] ?? '';
+        if (cultId && (overlay === 'culture' || layers.cultures)) {
+          const cCol = cultureColorMap.get(cultId);
+          if (cCol) {
+            traceHexPath(ctx, lx, ly, BASE_HEX_RADIUS + 0.2);
+            ctx.fillStyle = overlay === 'culture' ? `${cCol}88` : `${cCol}2c`;
+            ctx.fill();
+
+            const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+            ctx.save();
+            ctx.strokeStyle = cCol;
+            ctx.lineWidth = overlay === 'culture' ? 2.4 : 1.5;
+            ctx.setLineDash([2.5, 2.5]);
+            for (const nb of nbs) {
+              const nbCult = nb.inMap ? map.cultures?.[hexIndex(nb.q, nb.r, map.width)] ?? '' : '';
+              if (nbCult !== cultId) {
+                const [x1, y1] = hexVertex(lx, ly, BASE_HEX_RADIUS - 1.5, nb.edge);
+                const [x2, y2] = hexVertex(lx, ly, BASE_HEX_RADIUS - 1.5, nb.edge + 1);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+          }
+        }
+
         if (layers.grid) {
           traceHexPath(ctx, lx, ly, BASE_HEX_RADIUS);
           ctx.strokeStyle = 'rgba(12, 20, 30, 0.28)';
@@ -707,7 +742,7 @@ export class ChunkedMapRenderer {
     }
   ): void {
     const sizeKey = `${map.width}x${map.height}`;
-    const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${map.customBiomes.length}`;
+    const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${options.layers.cultures}_${map.customBiomes.length}`;
     if (
       map.id !== this.lastMapId ||
       sizeKey !== this.lastSizeKey ||
@@ -892,6 +927,20 @@ function drawDynamicLayers(
         id: r.id,
         name: `${r.symbol} ${r.name}`,
         color: r.color,
+      })),
+      zoom
+    );
+  } else if (options.overlay === 'culture' || layers.cultures) {
+    const cultTypeMap = new Map(CULTURE_TYPES.map((ct) => [ct.id, ct.label]));
+    drawCentroidLabels(
+      ctx,
+      map,
+      map.cultures ?? [],
+      (map.cultureList ?? []).map((c) => ({
+        id: c.id,
+        name: `${c.symbol} ${c.name}`,
+        color: c.color,
+        sub: options.overlay === 'culture' ? cultTypeMap.get(c.type) ?? c.type : undefined,
       })),
       zoom
     );
@@ -1125,7 +1174,10 @@ function drawDynamicLayers(
   // 10. Hover brush / hex cursor highlight
   if (options.hoverHex && options.tool !== 'view') {
     const r =
-      options.tool === 'terrain' || options.tool === 'territory' || options.tool === 'religion'
+      options.tool === 'terrain' ||
+      options.tool === 'territory' ||
+      options.tool === 'religion' ||
+      options.tool === 'culture'
         ? options.brushRadius
         : 0;
     const p = hexToPixel(options.hoverHex.q, options.hoverHex.r, BASE_HEX_RADIUS);
@@ -1270,6 +1322,7 @@ export function exportMapToPng(
 
   const kingdomColorMap = new Map(map.kingdoms.map((k) => [k.id, k.color]));
   const religionColorMap = new Map(map.religionList.map((r) => [r.id, r.color]));
+  const cultureColorMap = new Map((map.cultureList ?? []).map((c) => [c.id, c.color]));
 
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -1286,7 +1339,12 @@ export function exportMapToPng(
           ? moistureColor(map.moisture[idx] ?? 0.5)
           : meta.color;
       ctx.fill();
-      if (options.overlay === 'none' || options.overlay === 'political' || options.overlay === 'religion') {
+      if (
+        options.overlay === 'none' ||
+        options.overlay === 'political' ||
+        options.overlay === 'religion' ||
+        options.overlay === 'culture'
+      ) {
         if (map.biomes[idx] === BiomeId.SHALLOW_WATER) {
           const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
           let touchesNonCliffLand = false;
@@ -1350,6 +1408,15 @@ export function exportMapToPng(
         if (rCol) {
           traceHexPath(ctx, pos.x, pos.y, hexRadius + 0.2);
           ctx.fillStyle = options.overlay === 'religion' ? `${rCol}88` : `${rCol}30`;
+          ctx.fill();
+        }
+      }
+      const cultId = map.cultures?.[idx] ?? '';
+      if (cultId && (options.overlay === 'culture' || options.layers.cultures)) {
+        const cCol = cultureColorMap.get(cultId);
+        if (cCol) {
+          traceHexPath(ctx, pos.x, pos.y, hexRadius + 0.2);
+          ctx.fillStyle = options.overlay === 'culture' ? `${cCol}88` : `${cCol}2c`;
           ctx.fill();
         }
       }
@@ -1436,6 +1503,8 @@ export function exportMapToPng(
         ? 'อาณาจักร & การปกครอง'
         : options.overlay === 'religion'
         ? 'ศาสนา & ความเชื่อ'
+        : options.overlay === 'culture'
+        ? 'วัฒนธรรม & อารยธรรม'
         : 'ภูมิประเทศ (Biomes)',
       lx,
       ly
@@ -1458,6 +1527,15 @@ export function exportMapToPng(
         ctx.fillStyle = '#cbd5e1';
         ctx.font = '400 12px Sarabun, sans-serif';
         ctx.fillText(`${r.symbol} ${r.name}`, lx + 22, ly + 1);
+        ly += 22;
+      }
+    } else if (options.overlay === 'culture') {
+      for (const c of map.cultureList ?? []) {
+        ctx.fillStyle = c.color;
+        ctx.fillRect(lx, ly - 10, 14, 14);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '400 12px Sarabun, sans-serif';
+        ctx.fillText(`${c.symbol} ${c.name}`, lx + 22, ly + 1);
         ly += 22;
       }
     } else {

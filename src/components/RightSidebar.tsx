@@ -5,6 +5,7 @@ import {
   Download,
   Eraser,
   Flame,
+  Landmark,
   Mountain,
   Plus,
   Ruler,
@@ -16,16 +17,32 @@ import {
 } from 'lucide-react';
 import { getAllBiomes } from '../data/biomes';
 import { SPECIAL_FEATURES } from '../data/features';
-import { getAllPoiTypes, GOVERNMENT_TYPES, TRAVEL_SPEEDS } from '../data/goods';
+import {
+  CULTURE_TYPES,
+  getAllPoiTypes,
+  GOVERNMENT_TYPES,
+  RELIGION_TYPES,
+  TRAVEL_SPEEDS,
+} from '../data/goods';
 import { computeRealDimensions, findHexPath, realDistanceKm } from '../engine/hexMath';
-import { computeReligionStats, computeTerritoryStats } from '../engine/politics';
+import {
+  computeCultureStats,
+  computeReligionStats,
+  computeTerritoryStats,
+} from '../engine/politics';
 import {
   BiomeId,
   City,
   ClimateOverlay,
+  Culture,
+  CultureType,
   GeographyConfig,
+  GovernmentType,
   HexCoord,
   HexMapData,
+  Kingdom,
+  Religion,
+  ReligionType,
   ToolMode,
   TradeMode,
   TravelSpeedId,
@@ -56,6 +73,15 @@ interface RightSidebarProps {
   religionSubTool: 'brush' | 'fill' | 'erase';
   onChangeReligionSubTool: (t: 'brush' | 'fill' | 'erase') => void;
   onAutoReligions: () => void;
+  activeCultureId: string;
+  onSelectCultureId: (id: string) => void;
+  cultureSubTool: 'brush' | 'fill' | 'erase';
+  onChangeCultureSubTool: (t: 'brush' | 'fill' | 'erase') => void;
+  onAutoCultures: () => void;
+  onUpdateKingdoms: (kingdoms: Kingdom[]) => void;
+  onUpdateReligions: (religions: Religion[]) => void;
+  onUpdateCultures: (cultures: Culture[]) => void;
+  onOpenCityTrade: (cityId: string) => void;
   selectedCity: City | null;
   onUpdateCity: (id: string, patch: Partial<City>) => void;
   onDeleteCity: (id: string) => void;
@@ -105,6 +131,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     religionSubTool,
     onChangeReligionSubTool,
     onAutoReligions,
+    activeCultureId,
+    onSelectCultureId,
+    cultureSubTool,
+    onChangeCultureSubTool,
+    onAutoCultures,
+    onUpdateKingdoms,
+    onUpdateReligions,
+    onUpdateCultures,
+    onOpenCityTrade,
     selectedCity,
     onUpdateCity,
     onDeleteCity,
@@ -160,6 +195,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
 
   const territoryStats = useMemo(() => computeTerritoryStats(map), [map]);
   const religionStats = useMemo(() => computeReligionStats(map), [map]);
+  const cultureStats = useMemo(() => computeCultureStats(map), [map]);
+
+  const activeKingdom = map.kingdoms.find((k) => k.id === activeKingdomId) ?? map.kingdoms[0] ?? null;
+  const activeReligion =
+    map.religionList.find((r) => r.id === activeReligionId) ?? map.religionList[0] ?? null;
+  const activeCulture =
+    (map.cultureList ?? []).find((c) => c.id === activeCultureId) ??
+    (map.cultureList ?? [])[0] ??
+    null;
 
   const measureStats = useMemo(() => {
     if (measurePoints.length < 2) return null;
@@ -198,6 +242,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           city={selectedCity}
           map={map}
           onUpdate={(patch) => onUpdateCity(selectedCity.id, patch)}
+          onOpenTradeWindow={() => onOpenCityTrade(selectedCity.id)}
           onDelete={() => onDeleteCity(selectedCity.id)}
           onClose={onCloseCity}
         />
@@ -254,7 +299,31 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             />
           </div>
 
-          <div className="space-y-1 max-h-44 overflow-y-auto">
+          <div className="flex items-center justify-between pt-0.5">
+            <span className="text-[11px] text-slate-400">รายชื่อดินแดน ({map.kingdoms.length})</span>
+            <button
+              onClick={() => {
+                const newId = `kingdom_${Date.now().toString(36)}`;
+                onUpdateKingdoms([
+                  ...map.kingdoms,
+                  {
+                    id: newId,
+                    name: `ดินแดนใหม่ ${map.kingdoms.length + 1}`,
+                    color: '#38bdf8',
+                    government: 'monarchy',
+                  },
+                ]);
+                onSelectKingdomId(newId);
+                if (territorySubTool === 'erase') onChangeTerritorySubTool('brush');
+              }}
+              className="flex items-center gap-0.5 text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              เพิ่มดินแดน
+            </button>
+          </div>
+
+          <div className="space-y-1 max-h-40 overflow-y-auto">
             {map.kingdoms.map((k) => {
               const st = territoryStats.find((s) => s.kingdomId === k.id);
               const gov = GOVERNMENT_TYPES.find((g) => g.id === k.government)?.label ?? k.government;
@@ -294,6 +363,61 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
               );
             })}
           </div>
+
+          {activeKingdom && (
+            <div className="bg-[#0f1620] border border-slate-800 rounded p-2 space-y-1.5">
+              <div className="text-[10px] font-medium text-amber-300/90">
+                ปรับแต่งดินแดนที่เลือก
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={activeKingdom.color}
+                  onChange={(e) =>
+                    onUpdateKingdoms(
+                      map.kingdoms.map((k) =>
+                        k.id === activeKingdom.id ? { ...k, color: e.target.value } : k
+                      )
+                    )
+                  }
+                  className="w-6 h-6 bg-transparent border-0 cursor-pointer shrink-0"
+                  title="เปลี่ยนสีดินแดน"
+                />
+                <input
+                  type="text"
+                  value={activeKingdom.name}
+                  onChange={(e) =>
+                    onUpdateKingdoms(
+                      map.kingdoms.map((k) =>
+                        k.id === activeKingdom.id ? { ...k, name: e.target.value } : k
+                      )
+                    )
+                  }
+                  placeholder="ชื่อดินแดน..."
+                  className="flex-1 min-w-0 bg-[#151d28] border border-slate-700 focus:border-amber-500 rounded px-2 py-1 text-xs text-slate-100 outline-none"
+                />
+              </div>
+              <select
+                value={activeKingdom.government}
+                onChange={(e) =>
+                  onUpdateKingdoms(
+                    map.kingdoms.map((k) =>
+                      k.id === activeKingdom.id
+                        ? { ...k, government: e.target.value as GovernmentType }
+                        : k
+                    )
+                  )
+                }
+                className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
+              >
+                {GOVERNMENT_TYPES.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             onClick={onAutoTerritories}
@@ -356,7 +480,32 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             />
           </div>
 
-          <div className="space-y-1 max-h-44 overflow-y-auto">
+          <div className="flex items-center justify-between pt-0.5">
+            <span className="text-[11px] text-slate-400">รายชื่อศาสนา ({map.religionList.length})</span>
+            <button
+              onClick={() => {
+                const newId = `rel_${Date.now().toString(36)}`;
+                onUpdateReligions([
+                  ...map.religionList,
+                  {
+                    id: newId,
+                    name: `ศาสนาใหม่ ${map.religionList.length + 1}`,
+                    color: '#f472b6',
+                    symbol: '🕊️',
+                    type: 'monotheism',
+                  },
+                ]);
+                onSelectReligionId(newId);
+                if (religionSubTool === 'erase') onChangeReligionSubTool('brush');
+              }}
+              className="flex items-center gap-0.5 text-[11px] text-purple-300 hover:text-purple-200 cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              เพิ่มศาสนา
+            </button>
+          </div>
+
+          <div className="space-y-1 max-h-40 overflow-y-auto">
             {map.religionList.map((rel) => {
               const st = religionStats.find((s) => s.religionId === rel.id);
               const selected = activeReligionId === rel.id && religionSubTool !== 'erase';
@@ -389,12 +538,278 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             })}
           </div>
 
+          {activeReligion && (
+            <div className="bg-[#0f1620] border border-slate-800 rounded p-2 space-y-1.5">
+              <div className="text-[10px] font-medium text-purple-300/90">
+                ปรับแต่งศาสนาที่เลือก
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={activeReligion.color}
+                  onChange={(e) =>
+                    onUpdateReligions(
+                      map.religionList.map((r) =>
+                        r.id === activeReligion.id ? { ...r, color: e.target.value } : r
+                      )
+                    )
+                  }
+                  className="w-6 h-6 bg-transparent border-0 cursor-pointer shrink-0"
+                  title="เปลี่ยนสีศาสนา"
+                />
+                <input
+                  type="text"
+                  value={activeReligion.symbol}
+                  onChange={(e) =>
+                    onUpdateReligions(
+                      map.religionList.map((r) =>
+                        r.id === activeReligion.id ? { ...r, symbol: e.target.value } : r
+                      )
+                    )
+                  }
+                  className="w-9 text-center bg-[#151d28] border border-slate-700 rounded px-1 py-1 text-xs outline-none shrink-0"
+                  title="สัญลักษณ์"
+                />
+                <input
+                  type="text"
+                  value={activeReligion.name}
+                  onChange={(e) =>
+                    onUpdateReligions(
+                      map.religionList.map((r) =>
+                        r.id === activeReligion.id ? { ...r, name: e.target.value } : r
+                      )
+                    )
+                  }
+                  placeholder="ชื่อศาสนา..."
+                  className="flex-1 min-w-0 bg-[#151d28] border border-slate-700 focus:border-purple-400 rounded px-2 py-1 text-xs text-slate-100 outline-none"
+                />
+              </div>
+              <select
+                value={activeReligion.type}
+                onChange={(e) =>
+                  onUpdateReligions(
+                    map.religionList.map((r) =>
+                      r.id === activeReligion.id
+                        ? { ...r, type: e.target.value as ReligionType }
+                        : r
+                    )
+                  )
+                }
+                className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
+              >
+                {RELIGION_TYPES.map((rt) => (
+                  <option key={rt.id} value={rt.id}>
+                    {rt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button
             onClick={onAutoReligions}
             className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/50 text-purple-200 text-xs font-medium cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" />
             แพร่เขตศาสนาอัตโนมัติจากเมือง
+          </button>
+        </div>
+      )}
+
+      {tool === 'culture' && (
+        <div className="bg-[#151d28] border border-teal-500/40 rounded-lg p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-teal-300 flex items-center gap-1.5">
+              <Landmark className="w-4 h-4" />
+              วัฒนธรรม & อารยธรรม
+            </h3>
+            <button
+              onClick={() => onChangeOverlay(climateOverlay === 'culture' ? 'none' : 'culture')}
+              className={`px-2 py-0.5 rounded text-[10px] border cursor-pointer ${
+                climateOverlay === 'culture'
+                  ? 'bg-teal-500/25 border-teal-400 text-teal-200'
+                  : 'border-slate-700 text-slate-300'
+              }`}
+            >
+              {climateOverlay === 'culture' ? 'กำลังดูวัฒนธรรม' : 'เปิดมุมมองวัฒนธรรม'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1 text-[11px]">
+            {[
+              { id: 'brush', label: 'ระบายวัฒนธรรม' },
+              { id: 'fill', label: 'เทสีเขต' },
+              { id: 'erase', label: 'ลบเขต' },
+            ].map((m) => (
+              <button
+                key={m.id}
+                onClick={() => onChangeCultureSubTool(m.id as typeof cultureSubTool)}
+                className={`py-1 rounded border cursor-pointer ${
+                  cultureSubTool === m.id
+                    ? 'bg-teal-500/25 border-teal-400/70 text-teal-200'
+                    : 'bg-[#0f1620] border-slate-800 text-slate-400'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] text-slate-300">
+            <span>ขนาดพู่กัน: {brushSize}</span>
+            <input
+              type="range"
+              min={1}
+              max={6}
+              value={brushSize}
+              onChange={(e) => onChangeBrushSize(Number(e.target.value))}
+              className="flex-1"
+            />
+          </div>
+
+          <div className="flex items-center justify-between pt-0.5">
+            <span className="text-[11px] text-slate-400">
+              รายชื่อวัฒนธรรม ({(map.cultureList ?? []).length})
+            </span>
+            <button
+              onClick={() => {
+                const list = map.cultureList ?? [];
+                const newId = `cult_${Date.now().toString(36)}`;
+                onUpdateCultures([
+                  ...list,
+                  {
+                    id: newId,
+                    name: `วัฒนธรรมใหม่ ${list.length + 1}`,
+                    color: '#2dd4bf',
+                    symbol: '🏺',
+                    type: 'agrarian',
+                  },
+                ]);
+                onSelectCultureId(newId);
+                if (cultureSubTool === 'erase') onChangeCultureSubTool('brush');
+              }}
+              className="flex items-center gap-0.5 text-[11px] text-teal-300 hover:text-teal-200 cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              เพิ่มวัฒนธรรม
+            </button>
+          </div>
+
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {(map.cultureList ?? []).map((cult) => {
+              const st = cultureStats.find((s) => s.cultureId === cult.id);
+              const cultLabel =
+                CULTURE_TYPES.find((ct) => ct.id === cult.type)?.label ?? cult.type;
+              const selected = activeCultureId === cult.id && cultureSubTool !== 'erase';
+              return (
+                <button
+                  key={cult.id}
+                  onClick={() => {
+                    onSelectCultureId(cult.id);
+                    if (cultureSubTool === 'erase') onChangeCultureSubTool('brush');
+                  }}
+                  className={`w-full text-left px-2 py-1.5 rounded border text-xs transition cursor-pointer ${
+                    selected
+                      ? 'bg-teal-500/20 border-teal-400/70'
+                      : 'bg-[#0f1620] border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-medium text-slate-100">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: cult.color }}
+                      />
+                      <span>{cult.symbol}</span>
+                      <span>{cult.name}</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400">{st?.hexCount ?? 0} ช่อง</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 flex justify-between">
+                    <span>{cultLabel}</span>
+                    <span>
+                      {st?.cityCount ?? 0} เมือง · {(st?.population ?? 0).toLocaleString()} คน
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {activeCulture && (
+            <div className="bg-[#0f1620] border border-slate-800 rounded p-2 space-y-1.5">
+              <div className="text-[10px] font-medium text-teal-300/90">
+                ปรับแต่งวัฒนธรรมที่เลือก
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="color"
+                  value={activeCulture.color}
+                  onChange={(e) =>
+                    onUpdateCultures(
+                      (map.cultureList ?? []).map((c) =>
+                        c.id === activeCulture.id ? { ...c, color: e.target.value } : c
+                      )
+                    )
+                  }
+                  className="w-6 h-6 bg-transparent border-0 cursor-pointer shrink-0"
+                  title="เปลี่ยนสีวัฒนธรรม"
+                />
+                <input
+                  type="text"
+                  value={activeCulture.symbol}
+                  onChange={(e) =>
+                    onUpdateCultures(
+                      (map.cultureList ?? []).map((c) =>
+                        c.id === activeCulture.id ? { ...c, symbol: e.target.value } : c
+                      )
+                    )
+                  }
+                  className="w-9 text-center bg-[#151d28] border border-slate-700 rounded px-1 py-1 text-xs outline-none shrink-0"
+                  title="สัญลักษณ์"
+                />
+                <input
+                  type="text"
+                  value={activeCulture.name}
+                  onChange={(e) =>
+                    onUpdateCultures(
+                      (map.cultureList ?? []).map((c) =>
+                        c.id === activeCulture.id ? { ...c, name: e.target.value } : c
+                      )
+                    )
+                  }
+                  placeholder="ชื่อวัฒนธรรม..."
+                  className="flex-1 min-w-0 bg-[#151d28] border border-slate-700 focus:border-teal-400 rounded px-2 py-1 text-xs text-slate-100 outline-none"
+                />
+              </div>
+              <select
+                value={activeCulture.type}
+                onChange={(e) =>
+                  onUpdateCultures(
+                    (map.cultureList ?? []).map((c) =>
+                      c.id === activeCulture.id
+                        ? { ...c, type: e.target.value as CultureType }
+                        : c
+                    )
+                  )
+                }
+                className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200 outline-none"
+              >
+                {CULTURE_TYPES.map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    {ct.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button
+            onClick={onAutoCultures}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-teal-500/20 hover:bg-teal-500/30 border border-teal-400/50 text-teal-200 text-xs font-medium cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            แพร่วัฒนธรรมอัตโนมัติจากเมือง
           </button>
         </div>
       )}
@@ -532,6 +947,32 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
               >
                 ยกเลิก
               </button>
+            </div>
+          )}
+          {map.cities.length > 0 && (
+            <div className="pt-1 border-t border-slate-800 space-y-1">
+              <div className="text-[11px] text-slate-400">เปิดหน้าต่างการค้าของเมือง:</div>
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {map.cities.map((c) => {
+                  const cnt = map.tradeRoutes.filter(
+                    (tr) => tr.fromCityId === c.id || tr.toCityId === c.id
+                  ).length;
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between bg-[#0f1620] border border-slate-800 rounded px-2 py-1 text-xs"
+                    >
+                      <span className="text-slate-200 truncate">{c.name}</span>
+                      <button
+                        onClick={() => onOpenCityTrade(c.id)}
+                        className="px-2 py-0.5 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-[10px] text-sky-200 shrink-0 cursor-pointer"
+                      >
+                        ดูการค้า ({cnt})
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

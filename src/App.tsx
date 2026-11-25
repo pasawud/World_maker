@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CityTradeModal } from './components/CityTradeModal';
 import { CustomAssetsModal } from './components/CustomAssetsModal';
 import { EconomyModal } from './components/EconomyModal';
 import { ExportImportModal } from './components/ExportImportModal';
@@ -19,6 +20,7 @@ export function App() {
   const [showEconomyModal, setShowEconomyModal] = useState(false);
   const [customModalTab, setCustomModalTab] = useState<'biomes' | 'pois' | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [tradeModalCityId, setTradeModalCityId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -163,6 +165,7 @@ export function App() {
           onChangeRoadSubTool={editor.setRoadSubTool}
           territorySubTool={editor.territorySubTool}
           religionSubTool={editor.religionSubTool}
+          cultureSubTool={editor.cultureSubTool}
           poiSubTool={editor.poiSubTool}
           onChangePoiSubTool={editor.setPoiSubTool}
           poiType={editor.poiType}
@@ -184,6 +187,8 @@ export function App() {
           onFloodFillTerritoryAt={editor.floodFillTerritoryAt}
           onPaintReligionAt={editor.paintReligionAt}
           onFloodFillReligionAt={editor.floodFillReligionAt}
+          onPaintCultureAt={editor.paintCultureAt}
+          onFloodFillCultureAt={editor.floodFillCultureAt}
           onEndStroke={editor.endStroke}
           onFloodFillAt={editor.floodFillAt}
           onPlaceOrSelectCityAt={editor.placeOrSelectCityAt}
@@ -322,6 +327,19 @@ export function App() {
             if (editor.climateOverlay !== 'religion') editor.setClimateOverlay('religion');
             showToast('แพร่เขตศาสนาจากเมืองและเส้นทางคมนาคมแล้ว');
           }}
+          activeCultureId={editor.activeCultureId}
+          onSelectCultureId={editor.setActiveCultureId}
+          cultureSubTool={editor.cultureSubTool}
+          onChangeCultureSubTool={editor.setCultureSubTool}
+          onAutoCultures={() => {
+            editor.runAutoCultures();
+            if (editor.climateOverlay !== 'culture') editor.setClimateOverlay('culture');
+            showToast('แพร่วัฒนธรรมจากเมืองและเส้นทางคมนาคมแล้ว');
+          }}
+          onUpdateKingdoms={editor.updateKingdoms}
+          onUpdateReligions={editor.updateReligions}
+          onUpdateCultures={editor.updateCultures}
+          onOpenCityTrade={(cityId) => setTradeModalCityId(cityId)}
           selectedCity={selectedCity}
           onUpdateCity={editor.updateCity}
           onDeleteCity={editor.deleteCity}
@@ -385,12 +403,9 @@ export function App() {
           onUpdateGoods={(goods) =>
             editor.commitMapChange((prev) => ({ ...prev, goods }), [])
           }
-          onUpdateKingdoms={(kingdoms) =>
-            editor.commitMapChange((prev) => ({ ...prev, kingdoms }))
-          }
-          onUpdateReligions={(religionList) =>
-            editor.commitMapChange((prev) => ({ ...prev, religionList }))
-          }
+          onUpdateKingdoms={editor.updateKingdoms}
+          onUpdateReligions={editor.updateReligions}
+          onUpdateCultures={editor.updateCultures}
           onDeleteTradeRoute={(id) =>
             editor.commitMapChange(
               (prev) => ({
@@ -404,7 +419,28 @@ export function App() {
             editor.setSelectedCityId(cityId);
             editor.setTool('city');
           }}
+          onOpenCityTrade={(cityId) => setTradeModalCityId(cityId)}
           onClose={() => setShowEconomyModal(false)}
+        />
+      )}
+
+      {tradeModalCityId && editor.map.cities.some((c) => c.id === tradeModalCityId) && (
+        <CityTradeModal
+          cityId={tradeModalCityId}
+          map={editor.map}
+          onSelectCityId={(id) => setTradeModalCityId(id)}
+          onCreateTradeRoute={editor.createTradeRouteBetweenCities}
+          onDeleteTradeRoute={(id) =>
+            editor.commitMapChange(
+              (prev) => ({
+                ...prev,
+                tradeRoutes: prev.tradeRoutes.filter((r) => r.id !== id),
+              }),
+              []
+            )
+          }
+          onNotify={showToast}
+          onClose={() => setTradeModalCityId(null)}
         />
       )}
 

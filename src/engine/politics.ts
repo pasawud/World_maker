@@ -247,6 +247,121 @@ export function generateReligionsFromCities(
   return result;
 }
 
+/**
+ * Multi-source Dijkstra spread of cultures from cities.
+ * Respects oceans, high peaks, cliffs, canyons, and accelerates along roads.
+ */
+export function generateCulturesFromCities(
+  map: Pick<
+    HexMapData,
+    'width' | 'height' | 'biomes' | 'customBiomes' | 'features' | 'cities' | 'roads'
+  >
+): string[] {
+  const { width, height, biomes, customBiomes, features, cities, roads } = map;
+  const total = width * height;
+  const result = new Array<string>(total).fill('');
+  if (cities.length === 0) return result;
+
+  const roadBonus = new Uint8Array(total);
+  for (const rd of roads) {
+    if (rd.type === 'sea') continue;
+    for (const h of rd.hexes) {
+      if (h.q >= 0 && h.q < width && h.r >= 0 && h.r < height) {
+        roadBonus[hexIndex(h.q, h.r, width)] = 1;
+      }
+    }
+  }
+
+  const bestCost = new Float64Array(total).fill(Infinity);
+  const maxReach = new Float64Array(total).fill(0);
+
+  const heapCost: number[] = [];
+  const heapIdx: number[] = [];
+  const push = (c: number, idx: number) => {
+    heapCost.push(c);
+    heapIdx.push(idx);
+    let i = heapCost.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heapCost[p] <= heapCost[i]) break;
+      [heapCost[p], heapCost[i]] = [heapCost[i], heapCost[p]];
+      [heapIdx[p], heapIdx[i]] = [heapIdx[i], heapIdx[p]];
+      i = p;
+    }
+  };
+  const pop = (): { cost: number; idx: number } => {
+    const cost = heapCost[0];
+    const idx = heapIdx[0];
+    const lc = heapCost.pop()!;
+    const li = heapIdx.pop()!;
+    if (heapCost.length > 0) {
+      heapCost[0] = lc;
+      heapIdx[0] = li;
+      let i = 0;
+      const n = heapCost.length;
+      while (true) {
+        let best = i;
+        const l = i * 2 + 1;
+        const r = i * 2 + 2;
+        if (l < n && heapCost[l] < heapCost[best]) best = l;
+        if (r < n && heapCost[r] < heapCost[best]) best = r;
+        if (best === i) break;
+        [heapCost[i], heapCost[best]] = [heapCost[best], heapCost[i]];
+        [heapIdx[i], heapIdx[best]] = [heapIdx[best], heapIdx[i]];
+        i = best;
+      }
+    }
+    return { cost, idx };
+  };
+
+  for (const city of cities) {
+    if (!city.cultureId) continue;
+    const idx = hexIndex(city.q, city.r, width);
+    if (idx < 0 || idx >= total) continue;
+    if (isWaterBiome(biomes[idx], customBiomes)) continue;
+    bestCost[idx] = 0;
+    result[idx] = city.cultureId;
+    maxReach[idx] = tierMaxRadiusCost(city.tier, city.population) * 1.25;
+    push(0, idx);
+  }
+
+  while (heapCost.length > 0) {
+    const { cost, idx } = pop();
+    if (cost > bestCost[idx]) continue;
+    const cult = result[idx];
+    const limit = maxReach[idx];
+    const q = idx % width;
+    const r = (idx - q) / width;
+
+    for (const nb of getNeighbors(q, r, width, height)) {
+      const nbIdx = hexIndex(nb.q, nb.r, width);
+      const b = biomes[nbIdx];
+      const meta = getBiomeMetaWithCustom(b, customBiomes);
+      if (meta.isWater) continue;
+
+      let step = 1.15;
+      if (b === BiomeId.SNOW_PEAK) step = 7.0;
+      else if (b === BiomeId.MOUNTAIN) step = 4.0;
+      else if (b === BiomeId.HILLS || b === BiomeId.HIGHLAND) step = 1.5;
+
+      const featId = features?.[nbIdx];
+      if (featId === 'cliff' || featId === 'canyon') step += 2.5;
+      if (roadBonus[nbIdx]) step *= 0.68;
+
+      const nextCost = cost + step;
+      if (nextCost > limit) continue;
+      if (nextCost < bestCost[nbIdx]) {
+        bestCost[nbIdx] = nextCost;
+        result[nbIdx] = cult;
+        maxReach[nbIdx] = limit;
+        push(nextCost, nbIdx);
+      }
+    }
+  }
+
+  return result;
+}
+
 export interface TerritoryStat {
   kingdomId: string;
   hexCount: number;
@@ -289,6 +404,29 @@ export function computeReligionStats(map: HexMapData): ReligionStat[] {
       hexCount: counts.get(rel.id) ?? 0,
       cityCount: rCities.length,
       population: rCities.reduce((s, c) => s + c.population, 0),
+    };
+  });
+}
+
+export interface CultureStat {
+  cultureId: string;
+  hexCount: number;
+  cityCount: number;
+  population: number;
+}
+
+export function computeCultureStats(map: HexMapData): CultureStat[] {
+  const counts = new Map<string, number>();
+  for (const c of map.cultures ?? []) {
+    if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  return (map.cultureList ?? []).map((cult) => {
+    const cCities = map.cities.filter((c) => c.cultureId === cult.id);
+    return {
+      cultureId: cult.id,
+      hexCount: counts.get(cult.id) ?? 0,
+      cityCount: cCities.length,
+      population: cCities.reduce((s, c) => s + c.population, 0),
     };
   });
 }

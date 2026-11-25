@@ -45,6 +45,7 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
             { id: 'none', label: 'ไบโอมปกติ' },
             { id: 'political', label: 'การปกครอง' },
             { id: 'religion', label: 'ศาสนา' },
+            { id: 'culture', label: 'วัฒนธรรม' },
             { id: 'elevation', label: 'ความสูง' },
             { id: 'temperature', label: 'อุณหภูมิ' },
             { id: 'moisture', label: 'ความชื้น & ลม' },

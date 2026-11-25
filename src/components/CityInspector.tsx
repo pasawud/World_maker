@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Trash2, X } from 'lucide-react';
+import { Sparkles, Store, Trash2, X } from 'lucide-react';
 import { CITY_TIERS } from '../data/goods';
 import { autoSuggestGoodsForCity } from '../engine/worldGenerator';
 import { City, CityTier, HexMapData } from '../types/map';
@@ -8,6 +8,7 @@ interface CityInspectorProps {
   city: City;
   map: HexMapData;
   onUpdate: (patch: Partial<City>) => void;
+  onOpenTradeWindow: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -16,9 +17,13 @@ export const CityInspector: React.FC<CityInspectorProps> = ({
   city,
   map,
   onUpdate,
+  onOpenTradeWindow,
   onDelete,
   onClose,
 }) => {
+  const connectedRouteCount = map.tradeRoutes.filter(
+    (tr) => tr.fromCityId === city.id || tr.toCityId === city.id
+  ).length;
   const toggleGood = (field: 'producedGoods' | 'demandedGoods', goodId: string) => {
     const list = city[field];
     if (list.includes(goodId)) {
@@ -117,7 +122,34 @@ export const CityInspector: React.FC<CityInspectorProps> = ({
             </select>
           </div>
         </div>
+        <div>
+          <label className="block text-[11px] text-slate-400 mb-1">วัฒนธรรมหลัก</label>
+          <select
+            value={city.cultureId ?? ''}
+            onChange={(e) => onUpdate({ cultureId: e.target.value })}
+            className="w-full bg-[#0f1620] border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 outline-none"
+          >
+            {(map.cultureList ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.symbol} {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
+
+      <button
+        onClick={onOpenTradeWindow}
+        className="w-full flex items-center justify-between py-1.5 px-2.5 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/45 text-sky-200 text-xs font-medium transition cursor-pointer"
+      >
+        <span className="flex items-center gap-1.5">
+          <Store className="w-3.5 h-3.5 text-sky-400" />
+          <span>เปิดหน้าต่างการค้าของเมือง</span>
+        </span>
+        <span className="px-1.5 py-0.5 rounded bg-sky-500/25 text-[10px] text-sky-100">
+          {connectedRouteCount} เส้นทาง
+        </span>
+      </button>
 
       <button
         onClick={handleAutoSuggest}

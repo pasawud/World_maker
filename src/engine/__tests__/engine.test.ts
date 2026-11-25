@@ -20,8 +20,14 @@ import {
   validateRoadStep,
 } from '../hexMath';
 import { generateRiversAuto, priorityFloodFill } from '../hydrology';
-import { generateReligionsFromCities, generateTerritoriesFromCities } from '../politics';
+import {
+  computeCultureStats,
+  generateCulturesFromCities,
+  generateReligionsFromCities,
+  generateTerritoriesFromCities,
+} from '../politics';
 import { parseMapFromJson, resizeMap, serializeMapToJson } from '../serialization';
+import { computeCityTradeOverview, estimateRouteTradeValue } from '../trade';
 import {
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
@@ -501,5 +507,134 @@ describe('Cliff System & Automatic Shallow Water', () => {
     for (const nb of getNeighbors(7, 7, w, h)) {
       expect(res.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.SHALLOW_WATER);
     }
+  });
+});
+
+describe('Culture System, Customization & City Trade Overview', () => {
+  it('generates cultures from cities across land, avoids water, and computes stats accurately', () => {
+    const map = generateWorld(60, 45, 25, DEFAULT_GEOGRAPHY_CONFIG);
+    const cultures = generateCulturesFromCities(map);
+    expect(cultures.some((c) => c !== '')).toBe(true);
+
+    for (let i = 0; i < map.biomes.length; i++) {
+      if (isWaterBiome(map.biomes[i])) {
+        expect(cultures[i]).toBe('');
+      }
+    }
+
+    const stats = computeCultureStats({ ...map, cultures });
+    expect(stats.length).toBe(map.cultureList.length);
+    const totalHexes = stats.reduce((s, st) => s + st.hexCount, 0);
+    expect(totalHexes).toBeGreaterThan(0);
+  });
+
+  it('round-trips cultures and city cultureId, and migrates legacy JSON missing culture fields', () => {
+    const map = generateWorld(50, 40, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    expect(map.cultureList.length).toBeGreaterThan(0);
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+
+    expect(restored.cultureList).toEqual(map.cultureList);
+    expect(restored.cultures).toEqual(map.cultures);
+    if (restored.cities.length > 0) {
+      expect(restored.cities[0].cultureId).toBe(map.cities[0].cultureId);
+    }
+
+    const legacyObj = JSON.parse(json) as Record<string, unknown>;
+    delete legacyObj.cultures;
+    delete legacyObj.cultureList;
+    const migrated = parseMapFromJson(JSON.stringify(legacyObj));
+    expect(migrated.cultures).toHaveLength(50 * 40);
+    expect(migrated.cultureList.length).toBeGreaterThan(0);
+
+    const resized = resizeMap(restored, 55, 45, 30, 'preserve');
+    expect(resized.cultures).toHaveLength(55 * 45);
+    expect(resized.cultureList).toEqual(restored.cultureList);
+  });
+
+  it('computes city trade overview with route direction, value, fulfilled demands, and partner suggestions', () => {
+    const w = 24;
+    const h = 16;
+    const map = generateWorld(w, h, 25, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.15);
+    map.features = new Array<string>(w * h).fill('');
+    map.roads = [];
+
+    map.cities = [
+      {
+        id: 'c1',
+        name: 'เมืองท่าตะวันตก',
+        q: 3,
+        r: 6,
+        tier: 'city',
+        population: 30000,
+        kingdomId: map.kingdoms[0].id,
+        religionId: map.religionList[0].id,
+        cultureId: map.cultureList[0].id,
+        producedGoods: ['wheat', 'wine'],
+        demandedGoods: ['iron', 'gems'],
+        notes: '',
+      },
+      {
+        id: 'c2',
+        name: 'เมืองเหมืองแร่',
+        q: 10,
+        r: 6,
+        tier: 'town',
+        population: 12000,
+        kingdomId: map.kingdoms[0].id,
+        religionId: map.religionList[0].id,
+        cultureId: map.cultureList[0].id,
+        producedGoods: ['iron', 'salt'],
+        demandedGoods: ['wheat'],
+        notes: '',
+      },
+      {
+        id: 'c3',
+        name: 'นครอัญมณี',
+        q: 18,
+        r: 6,
+        tier: 'capital',
+        population: 60000,
+        kingdomId: map.kingdoms[1].id,
+        religionId: map.religionList[1].id,
+        cultureId: map.cultureList[1].id,
+        producedGoods: ['gems', 'silk'],
+        demandedGoods: ['wine', 'wheat'],
+        notes: '',
+      },
+    ];
+
+    map.tradeRoutes = [
+      {
+        id: 'tr1',
+        fromCityId: 'c1',
+        toCityId: 'c2',
+        goodIds: ['wheat', 'iron'],
+        mode: 'land',
+        hexes: [
+          { q: 3, r: 6 },
+          { q: 10, r: 6 },
+        ],
+        distanceKm: 175,
+        travelDays: 7,
+      },
+    ];
+
+    const routeVal = estimateRouteTradeValue(map.tradeRoutes[0], map);
+    expect(routeVal).toBeGreaterThan(0);
+
+    const overview = computeCityTradeOverview(map, 'c1');
+    expect(overview).not.toBeNull();
+    expect(overview!.routes).toHaveLength(1);
+    expect(overview!.routes[0].direction).toBe('mutual');
+    expect(overview!.routes[0].partnerCity?.id).toBe('c2');
+    expect(overview!.fulfilledDemandIds).toContain('iron');
+    expect(overview!.unfulfilledDemandIds).toContain('gems');
+    expect(overview!.totalEstimatedValue).toBe(routeVal);
+    expect(overview!.suggestions).toHaveLength(1);
+    expect(overview!.suggestions[0].partner.id).toBe('c3');
+    expect(overview!.suggestions[0].totalMatches).toBeGreaterThanOrEqual(2);
   });
 });

@@ -59,6 +59,7 @@ interface MapCanvasProps {
   onChangeRoadSubTool: (t: 'auto' | 'manual' | 'erase') => void;
   territorySubTool: 'brush' | 'fill' | 'erase';
   religionSubTool: 'brush' | 'fill' | 'erase';
+  cultureSubTool: 'brush' | 'fill' | 'erase';
   poiSubTool: 'poi' | 'label';
   onChangePoiSubTool: (t: 'poi' | 'label') => void;
   poiType: PoiType;
@@ -80,6 +81,8 @@ interface MapCanvasProps {
   onFloodFillTerritoryAt: (q: number, r: number, erase?: boolean) => void;
   onPaintReligionAt: (q: number, r: number, erase?: boolean) => void;
   onFloodFillReligionAt: (q: number, r: number, erase?: boolean) => void;
+  onPaintCultureAt: (q: number, r: number, erase?: boolean) => void;
+  onFloodFillCultureAt: (q: number, r: number, erase?: boolean) => void;
   onEndStroke: () => void;
   onFloodFillAt: (q: number, r: number) => void;
   onPlaceOrSelectCityAt: (q: number, r: number) => void;
@@ -117,6 +120,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onChangeRoadSubTool,
     territorySubTool,
     religionSubTool,
+    cultureSubTool,
     poiSubTool,
     onChangePoiSubTool,
     poiType,
@@ -138,6 +142,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onFloodFillTerritoryAt,
     onPaintReligionAt,
     onFloodFillReligionAt,
+    onPaintCultureAt,
+    onFloodFillCultureAt,
     onEndStroke,
     onFloodFillAt,
     onPlaceOrSelectCityAt,
@@ -341,6 +347,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           color = map.kingdoms.find((k) => k.id === map.territories[idx])?.color ?? color;
         } else if (climateOverlay === 'religion' && map.religions?.[idx]) {
           color = map.religionList.find((rl) => rl.id === map.religions[idx])?.color ?? color;
+        } else if (climateOverlay === 'culture' && map.cultures?.[idx]) {
+          color = (map.cultureList ?? []).find((cu) => cu.id === map.cultures[idx])?.color ?? color;
         }
         ctx.fillStyle = color;
         ctx.fillRect(q * sx, r * sy, Math.ceil(sx), Math.ceil(sy));
@@ -441,6 +449,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         onBeginStroke();
         onPaintReligionAt(h.q, h.r, religionSubTool === 'erase');
       }
+    } else if (tool === 'culture') {
+      if (cultureSubTool === 'fill') {
+        onFloodFillCultureAt(h.q, h.r, false);
+      } else {
+        isPaintingRef.current = true;
+        onBeginStroke();
+        onPaintCultureAt(h.q, h.r, cultureSubTool === 'erase');
+      }
     } else if (tool === 'river') {
       if (riverSubTool === 'erase') {
         onEraseRiverNear(h.q, h.r);
@@ -539,6 +555,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       onPaintTerritoryAt(h.q, h.r, territorySubTool === 'erase');
     } else if (tool === 'religion' && religionSubTool !== 'fill') {
       onPaintReligionAt(h.q, h.r, religionSubTool === 'erase');
+    } else if (tool === 'culture' && cultureSubTool !== 'fill') {
+      onPaintCultureAt(h.q, h.r, cultureSubTool === 'erase');
     } else if (tool === 'river' && riverSubTool === 'draw') {
       const cur = draftPathRef.current;
       const last = cur[cur.length - 1];
@@ -572,7 +590,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     }
     if (isPaintingRef.current) {
       isPaintingRef.current = false;
-      if (tool === 'terrain' || tool === 'territory' || tool === 'religion') {
+      if (tool === 'terrain' || tool === 'territory' || tool === 'religion' || tool === 'culture') {
         onEndStroke();
       } else if (tool === 'river' && riverSubTool === 'draw') {
         const pts = draftPathRef.current;
@@ -625,11 +643,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       : null;
     const relId = map.religions?.[idx] ?? '';
     const religion = relId ? map.religionList.find((r) => r.id === relId) : null;
+    const cultId = map.cultures?.[idx] ?? '';
+    const culture = cultId ? (map.cultureList ?? []).find((c) => c.id === cultId) : null;
     const elevM = Math.round((map.elevation[idx] ?? 0) * 5200);
     const temp = map.temperature[idx] ?? 15;
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
     const city = map.cities.find((c) => c.q === hoverHex.q && c.r === hoverHex.r);
-    return { biome, feat, kingdom, govLabel, religion, elevM, temp, moist, city };
+    return { biome, feat, kingdom, govLabel, religion, culture, elevM, temp, moist, city };
   }, [hoverHex, map]);
 
   const activeBiomeMeta = getBiomeMetaWithCustom(activeBiome, map.customBiomes);
@@ -761,6 +781,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           {tool === 'religion' && (
             <span className="text-purple-200">
               คลิกหรือลากบนแผ่นดินเพื่อกำหนดเขตศาสนา (เลือกศาสนาได้ในแถบขวา)
+            </span>
+          )}
+
+          {tool === 'culture' && (
+            <span className="text-teal-200">
+              คลิกหรือลากบนแผ่นดินเพื่อกำหนดเขตวัฒนธรรม (เลือก/ปรับแต่งวัฒนธรรมได้ในแถบขวา)
             </span>
           )}
 
@@ -979,6 +1005,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           {hoverInfo.religion && (
             <span className="text-purple-300">
               {hoverInfo.religion.symbol} {hoverInfo.religion.name}
+            </span>
+          )}
+          {hoverInfo.culture && (
+            <span className="text-teal-300">
+              {hoverInfo.culture.symbol} {hoverInfo.culture.name}
             </span>
           )}
           <span className="text-slate-300">

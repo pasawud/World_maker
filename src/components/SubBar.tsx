@@ -28,6 +28,7 @@ const OVERLAY_MODES: { id: ClimateOverlay; label: string }[] = [
   { id: 'none', label: 'ภูมิประเทศ' },
   { id: 'political', label: 'การปกครอง' },
   { id: 'religion', label: 'ศาสนา' },
+  { id: 'culture', label: 'วัฒนธรรม' },
   { id: 'elevation', label: 'ความสูง' },
   { id: 'temperature', label: 'อุณหภูมิ' },
   { id: 'moisture', label: 'ความชื้น' },
@@ -52,6 +53,7 @@ export const SubBar: React.FC<SubBarProps> = ({
     { key: 'borders', label: 'พรมแดน' },
     { key: 'territories', label: 'สีดินแดน' },
     { key: 'religions', label: 'เขตศาสนา' },
+    { key: 'cultures', label: 'วัฒนธรรม' },
     { key: 'cityNames', label: 'ชื่อเมือง' },
     { key: 'routes', label: 'เส้นทาง' },
     { key: 'rivers', label: 'แม่น้ำ' },
@@ -149,7 +151,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
         >
           <Package className="w-3 h-3 text-amber-400" />
-          <span>สินค้า · รัฐ · ศาสนา</span>
+          <span>สินค้า · รัฐ · ศาสนา · วัฒนธรรม</span>
         </button>
 
         <button
