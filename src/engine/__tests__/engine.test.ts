@@ -7,6 +7,7 @@ import {
   syncShallowWater,
 } from '../cliffs';
 import { generateCityPlan, createDefaultCityProfile } from '../cityGenerator';
+import { buildCityGeometry, pointInPolygon } from '../cityGeometry';
 import {
   computeRealDimensions,
   cubeToOffset,
@@ -778,5 +779,62 @@ describe('Deep Lore Custom Types, Timeline Snapshots & City Blueprint Generator'
     expect(restored.cities[0].plan?.waterSide).toBe('east');
     expect(restored.cities[0].plan?.districts.length).toBe(plan.districts.length);
     expect(restored.cities[0].profile?.defenseRating).toBe(9);
+  });
+
+  it('builds Watabou-style procedural city geometry with walls, towers, 5 water contours, piers, and non-flooded packed buildings', () => {
+    const w = 16;
+    const h = 14;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.18);
+    map.features = new Array<string>(w * h).fill('');
+    map.biomes[hexIndex(7, 6, w)] = BiomeId.SHALLOW_WATER;
+
+    const portCity: City = {
+      id: 'port_w',
+      name: 'เมืองท่าเพอร์ชเมนต์',
+      q: 6,
+      r: 6,
+      tier: 'city',
+      population: 34000,
+      kingdomId: map.kingdoms[0].id,
+      religionId: map.religionList[0].id,
+      cultureId: map.cultureList[0].id,
+      producedGoods: ['fish', 'salt'],
+      demandedGoods: ['wheat'],
+      notes: '',
+    };
+
+    const plan = generateCityPlan(map, portCity, { seed: 4242 });
+    const geom1 = buildCityGeometry(plan, portCity);
+    const geom2 = buildCityGeometry(plan, portCity);
+
+    // Deterministic output
+    expect(geom1.wallPolygon.length).toBe(geom2.wallPolygon.length);
+    expect(geom1.wards.length).toBe(geom2.wards.length);
+
+    // Walls, towers, plaza, packed buildings, suburbs, farms, trees
+    expect(geom1.wallPolygon.length).toBeGreaterThanOrEqual(12);
+    expect(geom1.wallChains.length).toBeGreaterThan(0);
+    expect(geom1.towers.length).toBeGreaterThan(4);
+    expect(geom1.plazaPolygon.length).toBe(5);
+    expect(geom1.wards.length).toBeGreaterThan(10);
+    const totalPackedBuildings = geom1.wards.reduce((s, wd) => s + wd.buildings.length, 0);
+    expect(totalPackedBuildings).toBeGreaterThan(40);
+    expect(geom1.suburbBuildings.length).toBeGreaterThan(0);
+    expect(geom1.farmFields.length).toBeGreaterThan(0);
+    expect(geom1.treeClusters.length).toBeGreaterThan(0);
+
+    // Coastal bay + 5 concentric shoreline contours + piers + no building inside water
+    expect(geom1.waterPolygon).not.toBeNull();
+    expect(geom1.waterContours).toHaveLength(5);
+    expect(geom1.piers.length).toBeGreaterThan(0);
+    for (const wd of geom1.wards) {
+      for (const b of wd.buildings) {
+        const cx = (b[0].x + b[1].x + b[2].x + b[3].x) * 0.25;
+        const cy = (b[0].y + b[1].y + b[2].y + b[3].y) * 0.25;
+        expect(pointInPolygon({ x: cx, y: cy }, geom1.waterPolygon!)).toBe(false);
+      }
+    }
   });
 });

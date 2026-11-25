@@ -255,6 +255,7 @@ export type CityLayoutStyle =
 
 export type CityWallStyle = 'none' | 'wooden' | 'stone' | 'citadel_double';
 export type CardinalSide = 'none' | 'north' | 'south' | 'east' | 'west';
+export type CityBlueprintTheme = 'parchment' | 'districts' | 'dark';
 
 export interface CityDemographicSlice {
   id: string;
@@ -272,6 +273,11 @@ export interface CityPlanData {
   riverAngle: number;
   hasCliff: boolean;
   cliffSide: CardinalSide;
+  theme?: CityBlueprintTheme;
+  showLabels?: boolean;
+  showFarms?: boolean;
+  showTrees?: boolean;
+  density?: number;
   districts: CityDistrict[];
   buildings: CityBuilding[];
   roads: CityRoadSegment[];

@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
+  Eye,
+  EyeOff,
   MapPin,
   Move,
   Plus,
@@ -18,10 +20,12 @@ import {
   CITY_TIERS,
 } from '../data/goods';
 import { createDefaultCityProfile, generateCityPlan } from '../engine/cityGenerator';
+import { buildCityGeometry } from '../engine/cityGeometry';
 import { exportCityPlanToPng, renderCityPlan } from '../engine/cityRenderer';
 import {
   CardinalSide,
   City,
+  CityBlueprintTheme,
   CityBuilding,
   CityBuildingCategory,
   CityDeepProfile,
@@ -87,10 +91,15 @@ export const CityBlueprintModal: React.FC<CityBlueprintModalProps> = ({
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [roadStart, setRoadStart] = useState<{ x: number; y: number } | null>(null);
 
-  const [cam, setCam] = useState({ x: 500, y: 500, zoom: 0.72 });
+  const [cam, setCam] = useState({ x: 500, y: 500, zoom: 0.78 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewSize, setViewSize] = useState({ w: 620, h: 560 });
+
+  const geometry = useMemo(
+    () => buildCityGeometry(plan, { ...city, plan, profile }),
+    [city, plan, profile]
+  );
 
   const draggingRef = useRef<
     | { kind: 'pan'; mx: number; my: number; cx: number; cy: number }
@@ -125,9 +134,10 @@ export const CityBlueprintModal: React.FC<CityBlueprintModalProps> = ({
       zoom: cam.zoom,
       selectedDistrictId,
       selectedBuildingId,
+      geometry,
     });
     ctx.restore();
-  }, [cam, city, map, plan, profile, selectedBuildingId, selectedDistrictId, viewSize]);
+  }, [cam, city, geometry, map, plan, profile, selectedBuildingId, selectedDistrictId, viewSize]);
 
   const toWorld = (clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -268,10 +278,18 @@ export const CityBlueprintModal: React.FC<CityBlueprintModalProps> = ({
 
   const handleRegenerate = (style?: CityLayoutStyle) => {
     const nextSeed = Math.floor(1000 + Math.random() * 90000);
-    const nextPlan = generateCityPlan(map, { ...city, profile }, {
+    const generated = generateCityPlan(map, { ...city, profile }, {
       seed: nextSeed,
       layoutStyle: style ?? plan.layoutStyle,
     });
+    const nextPlan: CityPlanData = {
+      ...generated,
+      theme: plan.theme ?? 'parchment',
+      showLabels: plan.showLabels ?? true,
+      showFarms: plan.showFarms ?? true,
+      showTrees: plan.showTrees ?? true,
+      density: plan.density ?? 1.0,
+    };
     commitPlan(nextPlan);
     setSelectedDistrictId(null);
     setSelectedBuildingId(null);
@@ -418,9 +436,50 @@ export const CityBlueprintModal: React.FC<CityBlueprintModalProps> = ({
                 <span>{roadStart ? 'คลิกปลายถนน' : 'วาดถนน'}</span>
               </button>
 
+              <div className="flex items-center bg-[#0f1620] border border-slate-700 rounded p-0.5 gap-0.5 ml-auto">
+                {(
+                  [
+                    { id: 'parchment', label: '📜 โบราณ' },
+                    { id: 'districts', label: '🎨 แบ่งสีเขต' },
+                    { id: 'dark', label: '🌙 มืด' },
+                  ] as { id: CityBlueprintTheme; label: string }[]
+                ).map((th) => (
+                  <button
+                    key={th.id}
+                    onClick={() => commitPlan({ ...plan, theme: th.id })}
+                    className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
+                      (plan.theme ?? 'parchment') === th.id
+                        ? 'bg-amber-500/25 text-amber-200 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {th.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() =>
+                  commitPlan({ ...plan, showLabels: !(plan.showLabels !== false) })
+                }
+                className={`flex items-center gap-1 px-2 py-1 rounded border cursor-pointer ${
+                  plan.showLabels !== false
+                    ? 'bg-sky-500/20 border-sky-400/60 text-sky-200'
+                    : 'bg-[#17202b] border-slate-700 text-slate-400'
+                }`}
+                title="แสดง/ซ่อนป้ายชื่อเขตและหมุดอาคาร (ปิดเพื่อดูแผนที่ลายเส้นโบราณล้วน)"
+              >
+                {plan.showLabels !== false ? (
+                  <Eye className="w-3.5 h-3.5" />
+                ) : (
+                  <EyeOff className="w-3.5 h-3.5" />
+                )}
+                <span>ป้ายชื่อ</span>
+              </button>
+
               <button
                 onClick={() => handleRegenerate()}
-                className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" /> สุ่มผังเมืองใหม่
               </button>
@@ -442,7 +501,7 @@ export const CityBlueprintModal: React.FC<CityBlueprintModalProps> = ({
                   canvasMode === 'select' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
                 }`}
               />
-              <div className="absolute bottom-2.5 left-2.5 bg-[#111720]/85 border border-slate-700/80 rounded px-2.5 py-1 text-[11px] text-slate-300 pointer-events-none">
+              <div className="absolute bottom-2.5 right-2.5 bg-[#111720]/85 border border-slate-700/80 rounded px-2.5 py-1 text-[11px] text-slate-300 pointer-events-none">
                 ลากเขตหรืออาคารเพื่อจัดวาง · ลากพื้นที่ว่างเพื่อเลื่อนดู · Scroll เพื่อซูม
               </div>
             </div>
@@ -707,6 +766,56 @@ export const CityBlueprintModal: React.FC<CityBlueprintModalProps> = ({
                           <span>มีแนวหน้าผา</span>
                         </label>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+                      <div>
+                        <label className="block text-[10px] text-slate-400">
+                          รัศมีกำแพงเมือง ({plan.wallRadius})
+                        </label>
+                        <input
+                          type="range"
+                          min={150}
+                          max={350}
+                          value={plan.wallRadius}
+                          onChange={(e) =>
+                            commitPlan({ ...plan, wallRadius: Number(e.target.value) })
+                          }
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-400">
+                          ความหนาแน่นอาคาร ({(plan.density ?? 1).toFixed(1)}x)
+                        </label>
+                        <input
+                          type="range"
+                          min={0.6}
+                          max={1.5}
+                          step={0.1}
+                          value={plan.density ?? 1}
+                          onChange={(e) =>
+                            commitPlan({ ...plan, density: Number(e.target.value) })
+                          }
+                          className="w-full"
+                        />
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={plan.showFarms !== false}
+                          onChange={(e) => commitPlan({ ...plan, showFarms: e.target.checked })}
+                        />
+                        <span>แปลงเกษตรชานเมือง</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={plan.showTrees !== false}
+                          onChange={(e) => commitPlan({ ...plan, showTrees: e.target.checked })}
+                        />
+                        <span>ต้นไม้ & แนวป่า</span>
+                      </label>
                     </div>
                   </div>
 
