@@ -1,0 +1,505 @@
+import { describe, expect, it } from 'vitest';
+import { getFeatureMeta } from '../../data/features';
+import { BiomeId } from '../../types/map';
+import {
+  autoDetectCliffsFromElevation,
+  getCliffEdges,
+  syncShallowWater,
+} from '../cliffs';
+import {
+  computeRealDimensions,
+  cubeToOffset,
+  findHexPath,
+  getNeighbors,
+  hexDistance,
+  hexIndex,
+  hexToPixel,
+  isWaterBiome,
+  offsetToCube,
+  pixelToHex,
+  validateRoadStep,
+} from '../hexMath';
+import { generateRiversAuto, priorityFloodFill } from '../hydrology';
+import { generateReligionsFromCities, generateTerritoriesFromCities } from '../politics';
+import { parseMapFromJson, resizeMap, serializeMapToJson } from '../serialization';
+import {
+  DEFAULT_GEOGRAPHY_CONFIG,
+  generateWorld,
+  simulateClimate,
+} from '../worldGenerator';
+
+describe('Hex Math & Real Dimensions', () => {
+  it('round-trips offset <-> cube and pixel <-> hex coordinates', () => {
+    for (let r = 0; r < 15; r++) {
+      for (let q = 0; q < 15; q++) {
+        const cube = offsetToCube(q, r);
+        expect(cube.x + cube.y + cube.z).toBe(0);
+        const back = cubeToOffset(cube);
+        expect(back).toEqual({ q, r });
+
+        const px = hexToPixel(q, r, 18);
+        const hex = pixelToHex(px.x, px.y, 18);
+        expect(hex).toEqual({ q, r });
+      }
+    }
+    expect(hexDistance({ q: 2, r: 2 }, { q: 2, r: 2 })).toBe(0);
+    expect(hexDistance({ q: 2, r: 2 }, { q: 3, r: 2 })).toBe(1);
+  });
+
+  it('computes real-world dimensions accurately', () => {
+    const dims = computeRealDimensions(240, 156, 50);
+    expect(dims.widthKm).toBe(12000);
+    expect(Math.round(dims.heightKm)).toBe(Math.round(156 * 50 * (Math.sqrt(3) / 2)));
+    expect(dims.totalHexes).toBe(240 * 156);
+    expect(dims.hexAreaKm2).toBeGreaterThan(2000);
+  });
+});
+
+describe('Realistic Road & Sea Route Validation (Bug Fixes)', () => {
+  it('A* land road routes around mountain/snow-peak walls and never steps on ocean', () => {
+    const w = 14;
+    const h = 12;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.12);
+    map.features = new Array<string>(w * h).fill('');
+    map.roads = [];
+
+    // Vertical mountain wall at q=6 from r=0..8
+    for (let r = 0; r <= 8; r++) {
+      map.biomes[hexIndex(6, r, w)] = BiomeId.MOUNTAIN;
+      map.elevation[hexIndex(6, r, w)] = 0.72;
+    }
+
+    const res = findHexPath(map, { q: 2, r: 3 }, { q: 10, r: 3 }, 'land');
+    expect(res.reachable).toBe(true);
+    const crossedMountain = res.hexes.some(
+      (pt) => map.biomes[hexIndex(pt.q, pt.r, w)] === BiomeId.MOUNTAIN
+    );
+    expect(crossedMountain).toBe(false);
+    expect(validateRoadStep(map, { q: 2, r: 3 }, 'stone', true)).toBe(true);
+  });
+
+  it('prevents placing sea routes on inland land and blocks sea pathfinding across land', () => {
+    const w = 14;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.features = new Array<string>(w * h).fill('');
+    map.roads = [];
+
+    // Make left coast (q=0..2) and right coast (q=11..13) water, separated by solid land (q=3..10)
+    for (let r = 0; r < h; r++) {
+      for (let q = 0; q <= 2; q++) map.biomes[hexIndex(q, r, w)] = BiomeId.SHALLOW_WATER;
+      for (let q = 11; q < w; q++) map.biomes[hexIndex(q, r, w)] = BiomeId.SHALLOW_WATER;
+    }
+
+    // Inland hex (q=6, r=5) cannot start or host a sea route
+    expect(validateRoadStep(map, { q: 6, r: 5 }, 'sea', true)).toBe(false);
+    expect(validateRoadStep(map, { q: 6, r: 5 }, 'sea', false)).toBe(false);
+    // Coastal port hex (q=3, r=5) can be an endpoint, water (q=1, r=5) can be anywhere
+    expect(validateRoadStep(map, { q: 3, r: 5 }, 'sea', true)).toBe(true);
+    expect(validateRoadStep(map, { q: 1, r: 5 }, 'sea', false)).toBe(true);
+
+    // Sea route between two inland hexes or across solid continent must fail!
+    const inlandRes = findHexPath(map, { q: 5, r: 4 }, { q: 8, r: 4 }, 'sea');
+    expect(inlandRes.reachable).toBe(false);
+
+    const acrossContinentRes = findHexPath(map, { q: 1, r: 5 }, { q: 12, r: 5 }, 'sea');
+    expect(acrossContinentRes.reachable).toBe(false);
+
+    // Same-sea path between two coastal/water hexes succeeds and stays strictly on water
+    const sameSea = findHexPath(map, { q: 3, r: 1 }, { q: 3, r: 8 }, 'sea');
+    expect(sameSea.reachable).toBe(true);
+    for (let i = 1; i < sameSea.hexes.length - 1; i++) {
+      const pt = sameSea.hexes[i];
+      expect(isWaterBiome(map.biomes[hexIndex(pt.q, pt.r, w)], map.customBiomes)).toBe(true);
+    }
+  });
+});
+
+describe('Real-Geography Climate, Hydrology, Politics, Religion & Features', () => {
+  it('produces colder temperatures at poles and high mountains (lapse rate)', () => {
+    const w = 20;
+    const h = 21;
+    const elev = new Array<number>(w * h).fill(0.1);
+    elev[hexIndex(10, 10, w)] = 0.85;
+
+    const cfg = { ...DEFAULT_GEOGRAPHY_CONFIG, latNorth: 75, latSouth: 0 };
+    const { temperature } = simulateClimate(elev, w, h, cfg);
+
+    expect(temperature[hexIndex(5, 0, w)]).toBeLessThan(temperature[hexIndex(5, 20, w)]);
+    expect(temperature[hexIndex(10, 10, w)]).toBeLessThan(temperature[hexIndex(5, 10, w)] - 15);
+  });
+
+  it('produces orographic precipitation and a dry rain shadow on leeward side of mountains', () => {
+    const w = 36;
+    const h = 12;
+    const elev = new Array<number>(w * h).fill(0.15);
+    for (let r = 0; r < h; r++) {
+      for (let q = 0; q < 8; q++) elev[hexIndex(q, r, w)] = -0.4;
+      for (let q = 16; q <= 18; q++) elev[hexIndex(q, r, w)] = 0.78;
+    }
+
+    const cfg = { ...DEFAULT_GEOGRAPHY_CONFIG, windMode: 'west' as const, latNorth: 45, latSouth: 35 };
+    const { moisture } = simulateClimate(elev, w, h, cfg);
+    expect(moisture[hexIndex(15, 6, w)]).toBeGreaterThan(moisture[hexIndex(22, 6, w)] + 0.12);
+  });
+
+  it('Priority-Flood and auto-river generation flow monotonically downhill', () => {
+    const map = generateWorld(70, 50, 25, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 12345,
+      riverThreshold: 14,
+    });
+    const hydro = generateRiversAuto(map, { threshold: 14, useCurrentBiomes: false });
+    expect(hydro.rivers.length).toBeGreaterThan(0);
+
+    const isWater = new Uint8Array(map.width * map.height);
+    for (let i = 0; i < map.biomes.length; i++) {
+      if (map.biomes[i] === BiomeId.DEEP_OCEAN || map.biomes[i] === BiomeId.SHALLOW_WATER) {
+        isWater[i] = 1;
+      }
+    }
+    const filled = priorityFloodFill(map.elevation, map.width, map.height, isWater);
+
+    for (const river of hydro.rivers) {
+      expect(river.points.length).toBeGreaterThanOrEqual(3);
+      for (let i = 0; i < river.points.length - 1; i++) {
+        const idxA = hexIndex(river.points[i].q, river.points[i].r, map.width);
+        const idxB = hexIndex(river.points[i + 1].q, river.points[i + 1].r, map.width);
+        expect(filled[idxB]).toBeLessThan(filled[idxA]);
+      }
+    }
+  });
+
+  it('generates political territories, religious zones, and valid special features', () => {
+    const map = generateWorld(60, 45, 25, DEFAULT_GEOGRAPHY_CONFIG);
+    const territories = generateTerritoriesFromCities(map);
+    const religions = generateReligionsFromCities(map);
+
+    expect(territories.some((t) => t !== '')).toBe(true);
+    expect(religions.some((r) => r !== '')).toBe(true);
+
+    for (let i = 0; i < map.biomes.length; i++) {
+      const water = isWaterBiome(map.biomes[i]);
+      if (water) {
+        // Oceans should never be claimed as political land territories or religious zones
+        expect(territories[i]).toBe('');
+        expect(religions[i]).toBe('');
+      }
+      const fId = map.features[i];
+      if (fId) {
+        const meta = getFeatureMeta(fId);
+        expect(meta).not.toBeNull();
+        if (meta?.placement === 'water') expect(water).toBe(true);
+        if (meta?.placement === 'land' || meta?.placement === 'coast') expect(water).toBe(false);
+      }
+    }
+  });
+});
+
+describe('Custom Biomes, Custom POIs & Serialization Backward Compatibility', () => {
+  it('round-trips custom biomes, POIs, territories, religions, features, and migrates legacy JSON', () => {
+    const map = generateWorld(50, 40, 20, DEFAULT_GEOGRAPHY_CONFIG, 'โลกแฟนตาซี');
+    map.customBiomes.push({
+      id: 100,
+      nameTh: 'ทุ่งคริสตัล',
+      color: '#a855f7',
+      isWater: false,
+      defaultElevation: 0.25,
+      moveCost: 1.5,
+      detailStyle: 'crystal',
+    });
+    map.customPoiTypes.push({
+      id: 'poi_custom_portal',
+      label: 'ประตูมิติ',
+      symbol: '🌀',
+      color: '#38bdf8',
+      isCustom: true,
+    });
+    map.biomes[hexIndex(10, 10, map.width)] = 100;
+
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+
+    expect(restored.customBiomes).toHaveLength(1);
+    expect(restored.customBiomes[0].nameTh).toBe('ทุ่งคริสตัล');
+    expect(restored.customPoiTypes).toHaveLength(1);
+    expect(restored.biomes[hexIndex(10, 10, map.width)]).toBe(100);
+    expect(restored.territories).toEqual(map.territories);
+    expect(restored.religions).toEqual(map.religions);
+    expect(restored.features).toEqual(map.features);
+
+    // Legacy JSON without new fields parses cleanly
+    const legacyObj = JSON.parse(json) as Record<string, unknown>;
+    delete legacyObj.features;
+    delete legacyObj.territories;
+    delete legacyObj.religions;
+    delete legacyObj.religionList;
+    delete legacyObj.customBiomes;
+    delete legacyObj.customPoiTypes;
+    const migrated = parseMapFromJson(JSON.stringify(legacyObj));
+    expect(migrated.features).toHaveLength(50 * 40);
+    expect(migrated.religionList.length).toBeGreaterThan(0);
+
+    const resized = resizeMap(restored, 55, 45, 40, 'preserve');
+    expect(resized.customBiomes).toHaveLength(1);
+    expect(resized.territories).toHaveLength(55 * 45);
+  });
+});
+
+describe('Cliff System & Automatic Shallow Water', () => {
+  it('turns ocean near land into shallow water and reverts orphaned shallow water back to deep ocean', () => {
+    const w = 10;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.DEEP_OCEAN);
+    map.elevation = new Array<number>(w * h).fill(-0.65);
+    map.features = new Array<string>(w * h).fill('');
+
+    // Place a single land hex in the middle of deep ocean
+    const centerIdx = hexIndex(5, 5, w);
+    map.biomes[centerIdx] = BiomeId.GRASSLAND;
+    map.elevation[centerIdx] = 0.12;
+
+    const afterPlace = syncShallowWater(map, { changedHexes: [{ q: 5, r: 5 }] });
+    expect(afterPlace.changed).toBe(true);
+    for (const nb of getNeighbors(5, 5, w, h)) {
+      expect(afterPlace.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.SHALLOW_WATER);
+    }
+    // Distant hex stays deep ocean
+    expect(afterPlace.biomes[hexIndex(0, 0, w)]).toBe(BiomeId.DEEP_OCEAN);
+
+    // Erase the land hex back to deep ocean -> shallow water reverts to deep ocean
+    afterPlace.biomes[centerIdx] = BiomeId.DEEP_OCEAN;
+    afterPlace.elevation[centerIdx] = -0.65;
+    const afterErase = syncShallowWater(
+      { ...map, biomes: afterPlace.biomes, elevation: afterPlace.elevation, features: afterPlace.features },
+      { changedHexes: [{ q: 5, r: 5 }] }
+    );
+    for (const nb of getNeighbors(5, 5, w, h)) {
+      expect(afterErase.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.DEEP_OCEAN);
+    }
+  });
+
+  it('prevents shallow water next to cliff coasts, clears shallow-only features, and restores on cliff removal', () => {
+    const w = 12;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.DEEP_OCEAN);
+    map.elevation = new Array<number>(w * h).fill(-0.65);
+    map.features = new Array<string>(w * h).fill('');
+
+    // Horizontal strip of land at r=3 from q=3..8
+    for (let q = 3; q <= 8; q++) {
+      const idx = hexIndex(q, 3, w);
+      map.biomes[idx] = BiomeId.GRASSLAND;
+      map.elevation[idx] = 0.25;
+    }
+
+    const synced1 = syncShallowWater(map);
+    const seaNextToMiddle = getNeighbors(5, 3, w, h).filter((nb) =>
+      isWaterBiome(synced1.biomes[hexIndex(nb.q, nb.r, w)])
+    );
+    expect(seaNextToMiddle.length).toBeGreaterThan(0);
+    for (const nb of seaNextToMiddle) {
+      expect(synced1.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.SHALLOW_WATER);
+    }
+
+    // Put coral_reef on one of the shallow hexes, then place a cliff at (5, 3)
+    const testSea = seaNextToMiddle[0];
+    synced1.features[hexIndex(testSea.q, testSea.r, w)] = 'coral_reef';
+    synced1.features[hexIndex(5, 3, w)] = 'cliff';
+
+    const syncedCliff = syncShallowWater(
+      { ...map, biomes: synced1.biomes, elevation: synced1.elevation, features: synced1.features },
+      { changedHexes: [{ q: 5, r: 3 }] }
+    );
+    for (const nb of seaNextToMiddle) {
+      expect(syncedCliff.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.DEEP_OCEAN);
+    }
+    expect(syncedCliff.features[hexIndex(testSea.q, testSea.r, w)]).toBe('');
+
+    // Non-cliff coast far enough away (e.g. neighbor of (8, 3) not touching (5, 3)) remains shallow water
+    const farNonCliffSea = getNeighbors(8, 3, w, h).filter(
+      (nb) =>
+        isWaterBiome(syncedCliff.biomes[hexIndex(nb.q, nb.r, w)]) &&
+        hexDistance(nb, { q: 5, r: 3 }) > 1
+    );
+    expect(farNonCliffSea.length).toBeGreaterThan(0);
+    for (const nb of farNonCliffSea) {
+      expect(syncedCliff.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.SHALLOW_WATER);
+    }
+
+    // Remove the cliff -> adjacent sea returns to SHALLOW_WATER
+    syncedCliff.features[hexIndex(5, 3, w)] = '';
+    const restored = syncShallowWater(
+      { ...map, biomes: syncedCliff.biomes, elevation: syncedCliff.elevation, features: syncedCliff.features },
+      { changedHexes: [{ q: 5, r: 3 }] }
+    );
+    for (const nb of seaNextToMiddle) {
+      expect(restored.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.SHALLOW_WATER);
+    }
+  });
+
+  it('preserves custom water biomes and creates shallow water around custom land biomes', () => {
+    const w = 10;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.customBiomes = [
+      {
+        id: 100,
+        nameTh: 'ทะเลอาถรรพ์',
+        color: '#4c1d95',
+        isWater: true,
+        defaultElevation: -0.4,
+        moveCost: 99,
+        detailStyle: 'none',
+      },
+      {
+        id: 101,
+        nameTh: 'แผ่นดินคริสตัล',
+        color: '#a855f7',
+        isWater: false,
+        defaultElevation: 0.25,
+        moveCost: 1.5,
+        detailStyle: 'crystal',
+      },
+    ];
+    map.biomes = new Array<number>(w * h).fill(BiomeId.DEEP_OCEAN);
+    map.elevation = new Array<number>(w * h).fill(-0.65);
+    map.features = new Array<string>(w * h).fill('');
+
+    // Custom water next to custom land
+    map.biomes[hexIndex(5, 5, w)] = 101;
+    map.elevation[hexIndex(5, 5, w)] = 0.25;
+    map.biomes[hexIndex(6, 5, w)] = 100;
+    map.elevation[hexIndex(6, 5, w)] = -0.4;
+
+    const res = syncShallowWater(map);
+    // Custom water (100) must not be overwritten
+    expect(res.biomes[hexIndex(6, 5, w)]).toBe(100);
+    // Built-in ocean neighbors of custom land (101) become SHALLOW_WATER
+    expect(res.biomes[hexIndex(4, 5, w)]).toBe(BiomeId.SHALLOW_WATER);
+  });
+
+  it('computes cliff edges toward water/lower elevation, merges adjacent cliffs, and falls back on flat land', () => {
+    const w = 10;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.2);
+    map.features = new Array<string>(w * h).fill('');
+
+    // Flat land fallback
+    map.features[hexIndex(2, 2, w)] = 'cliff';
+    const flatEdges = getCliffEdges(map, 2, 2);
+    expect(flatEdges.length).toBeGreaterThan(0);
+
+    // Chained coastal cliffs at (5, 5) and (6, 5) with water at r=6
+    map.biomes[hexIndex(5, 6, w)] = BiomeId.DEEP_OCEAN;
+    map.biomes[hexIndex(6, 6, w)] = BiomeId.DEEP_OCEAN;
+    map.features[hexIndex(5, 5, w)] = 'cliff';
+    map.features[hexIndex(6, 5, w)] = 'cliff';
+
+    const edges55 = getCliffEdges(map, 5, 5);
+    expect(edges55.length).toBeGreaterThan(0);
+    // Edge 0 goes east (+1, 0) to (6, 5), which is also a cliff -> must be suppressed
+    expect(edges55).not.toContain(0);
+
+    // Inland elevation drop at (2, 7): neighbor (3, 7) is lower by > 0.06
+    map.features[hexIndex(2, 7, w)] = 'cliff';
+    map.elevation[hexIndex(2, 7, w)] = 0.5;
+    map.elevation[hexIndex(3, 7, w)] = 0.1;
+    const inlandEdges = getCliffEdges(map, 2, 7);
+    expect(inlandEdges).toContain(0);
+  });
+
+  it('enforces coastal shallow-water and cliff invariant across generated worlds', () => {
+    const map = generateWorld(80, 60, 25, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 77712,
+    });
+
+    for (let r = 0; r < map.height; r++) {
+      for (let q = 0; q < map.width; q++) {
+        const idx = hexIndex(q, r, map.width);
+        const b = map.biomes[idx];
+        if (b !== BiomeId.DEEP_OCEAN && b !== BiomeId.SHALLOW_WATER) continue;
+
+        const nbs = getNeighbors(q, r, map.width, map.height);
+        const touchesCliff = nbs.some((nb) => {
+          const nbIdx = hexIndex(nb.q, nb.r, map.width);
+          return !isWaterBiome(map.biomes[nbIdx]) && map.features[nbIdx] === 'cliff';
+        });
+        const touchesNonCliffLand = nbs.some((nb) => {
+          const nbIdx = hexIndex(nb.q, nb.r, map.width);
+          return !isWaterBiome(map.biomes[nbIdx]) && map.features[nbIdx] !== 'cliff';
+        });
+
+        if (touchesCliff) {
+          expect(b).toBe(BiomeId.DEEP_OCEAN);
+        } else if (touchesNonCliffLand) {
+          expect(b).toBe(BiomeId.SHALLOW_WATER);
+        } else {
+          expect(b).toBe(BiomeId.DEEP_OCEAN);
+        }
+      }
+    }
+  });
+
+  it('blocks sea routes from docking/starting on coastal cliffs while allowing normal coasts', () => {
+    const w = 12;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.DEEP_OCEAN);
+    map.elevation = new Array<number>(w * h).fill(-0.65);
+    map.features = new Array<string>(w * h).fill('');
+    map.roads = [];
+
+    // Coastal cliff at (5, 4) and normal sandy coast at (5, 6)
+    map.biomes[hexIndex(5, 4, w)] = BiomeId.HIGHLAND;
+    map.elevation[hexIndex(5, 4, w)] = 0.5;
+    map.features[hexIndex(5, 4, w)] = 'cliff';
+
+    map.biomes[hexIndex(5, 6, w)] = BiomeId.GRASSLAND;
+    map.elevation[hexIndex(5, 6, w)] = 0.12;
+
+    expect(validateRoadStep(map, { q: 5, r: 4 }, 'sea', true)).toBe(false);
+    expect(validateRoadStep(map, { q: 5, r: 6 }, 'sea', true)).toBe(true);
+
+    const cliffSea = findHexPath(map, { q: 5, r: 4 }, { q: 2, r: 4 }, 'sea');
+    expect(cliffSea.reachable).toBe(false);
+
+    const coastSea = findHexPath(map, { q: 5, r: 6 }, { q: 2, r: 6 }, 'sea');
+    expect(coastSea.reachable).toBe(true);
+  });
+
+  it('autoDetectCliffsFromElevation marks steep coastal hexes as cliffs and keeps adjacent water deep', () => {
+    const w = 10;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.SHALLOW_WATER);
+    map.elevation = new Array<number>(w * h).fill(-0.18);
+    map.features = new Array<string>(w * h).fill('');
+
+    const mtnIdx = hexIndex(4, 4, w);
+    map.biomes[mtnIdx] = BiomeId.MOUNTAIN;
+    map.elevation[mtnIdx] = 0.68;
+
+    const flatIdx = hexIndex(7, 7, w);
+    map.biomes[flatIdx] = BiomeId.GRASSLAND;
+    map.elevation[flatIdx] = 0.12;
+
+    const res = autoDetectCliffsFromElevation(map);
+    expect(res.features[mtnIdx]).toBe('cliff');
+    expect(res.features[flatIdx]).toBe('');
+    for (const nb of getNeighbors(4, 4, w, h)) {
+      expect(res.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.DEEP_OCEAN);
+    }
+    for (const nb of getNeighbors(7, 7, w, h)) {
+      expect(res.biomes[hexIndex(nb.q, nb.r, w)]).toBe(BiomeId.SHALLOW_WATER);
+    }
+  });
+});

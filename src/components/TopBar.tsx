@@ -1,0 +1,203 @@
+import React, { useState } from 'react';
+import {
+  Building2,
+  CloudSun,
+  Compass,
+  Crown,
+  Flame,
+  FolderOpen,
+  Map as MapIcon,
+  MapPin,
+  MousePointer2,
+  Paintbrush,
+  Redo2,
+  Route,
+  Ruler,
+  Sparkles,
+  Store,
+  Undo2,
+  Waves,
+} from 'lucide-react';
+import { HexMapData, ToolMode } from '../types/map';
+
+interface TopBarProps {
+  map: HexMapData;
+  tool: ToolMode;
+  onSelectTool: (t: ToolMode) => void;
+  onRenameMap: (name: string) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  autosaveStatus: 'saved' | 'saving';
+  showMinimap: boolean;
+  onToggleMinimap: () => void;
+  onOpenLibrary: () => void;
+  onOpenSizeModal: () => void;
+  onQuickGenerateWorld: () => void;
+}
+
+const TOOL_ITEMS: { id: ToolMode; label: string; icon: React.ReactNode; shortcut: string }[] = [
+  { id: 'view', label: 'ดูแผนที่', icon: <MousePointer2 className="w-3.5 h-3.5" />, shortcut: '1' },
+  { id: 'terrain', label: 'ระบายภูมิประเทศ', icon: <Paintbrush className="w-3.5 h-3.5" />, shortcut: '2' },
+  { id: 'river', label: 'วาดแม่น้ำ', icon: <Waves className="w-3.5 h-3.5" />, shortcut: '3' },
+  { id: 'city', label: 'วางเมือง', icon: <Building2 className="w-3.5 h-3.5" />, shortcut: '4' },
+  { id: 'territory', label: 'ดินแดน', icon: <Crown className="w-3.5 h-3.5" />, shortcut: '5' },
+  { id: 'religion', label: 'ศาสนา', icon: <Flame className="w-3.5 h-3.5" />, shortcut: '6' },
+  { id: 'road', label: 'ถนน / เดินเรือ', icon: <Route className="w-3.5 h-3.5" />, shortcut: '7' },
+  { id: 'trade', label: 'การค้า', icon: <Store className="w-3.5 h-3.5" />, shortcut: '8' },
+  { id: 'measure', label: 'วัดระยะ', icon: <Ruler className="w-3.5 h-3.5" />, shortcut: '9' },
+  { id: 'poi', label: 'จุดสำคัญ', icon: <MapPin className="w-3.5 h-3.5" />, shortcut: '0' },
+  { id: 'climate', label: 'ภูมิอากาศ', icon: <CloudSun className="w-3.5 h-3.5" />, shortcut: '' },
+];
+
+export const TopBar: React.FC<TopBarProps> = ({
+  map,
+  tool,
+  onSelectTool,
+  onRenameMap,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  autosaveStatus,
+  showMinimap,
+  onToggleMinimap,
+  onOpenLibrary,
+  onOpenSizeModal,
+  onQuickGenerateWorld,
+}) => {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftName, setDraftName] = useState(map.name);
+
+  return (
+    <header className="h-11 bg-[#111720] border-b border-slate-800/90 px-2.5 flex items-center justify-between gap-2 select-none shrink-0 z-20">
+      {/* Left: Library + Map Name + Dimensions */}
+      <div className="flex items-center gap-2 min-w-0">
+        <button
+          onClick={onOpenLibrary}
+          className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#18212d] hover:bg-[#222e3e] border border-slate-700/80 text-xs text-slate-200 transition cursor-pointer shrink-0"
+          title="คลังแผนที่และนำเข้า/ส่งออก"
+        >
+          <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+          <span className="hidden xl:inline">คลังแผนที่</span>
+        </button>
+
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={() => {
+              setEditingTitle(false);
+              if (draftName.trim()) onRenameMap(draftName.trim());
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setEditingTitle(false);
+                if (draftName.trim()) onRenameMap(draftName.trim());
+              }
+            }}
+            className="bg-[#1c2635] border border-amber-500/70 rounded px-2 py-0.5 text-sm font-semibold text-amber-100 outline-none w-40"
+          />
+        ) : (
+          <button
+            onClick={() => {
+              setDraftName(map.name);
+              setEditingTitle(true);
+            }}
+            className="text-sm font-semibold text-amber-100 hover:text-amber-300 truncate max-w-[130px] cursor-pointer"
+            title="คลิกเพื่อเปลี่ยนชื่อแผนที่"
+          >
+            {map.name}
+          </button>
+        )}
+
+        <button
+          onClick={onOpenSizeModal}
+          className="hidden 2xl:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#161e29] hover:bg-[#1f2b3a] border border-slate-700/60 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer shrink-0"
+          title="ปรับแต่งขนาดแผนที่และมาตราส่วนระยะจริง"
+        >
+          <Compass className="w-3 h-3 text-amber-400/80" />
+          <span>
+            {map.width} × {map.height} · {map.hexSizeKm} กม.
+          </span>
+        </button>
+      </div>
+
+      {/* Center: Tool Mode Switcher */}
+      <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+        {TOOL_ITEMS.map((item) => {
+          const active = tool === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onSelectTool(item.id)}
+              title={item.shortcut ? `${item.label} (คีย์ลัด ${item.shortcut})` : item.label}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition cursor-pointer ${
+                active
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(217,155,56,0.18)]'
+                  : 'bg-[#17202b] text-slate-300 hover:bg-[#202c3b] border border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+
+        <div className="h-5 w-px bg-slate-800 mx-0.5 shrink-0" />
+
+        <button
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="ย้อนกลับ (Ctrl+Z)"
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <Undo2 className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="ทำซ้ำ (Ctrl+Y)"
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <Redo2 className="w-3.5 h-3.5" />
+        </button>
+      </nav>
+
+      {/* Right: Autosave + Minimap + Generate CTA */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="hidden 2xl:inline-flex items-center gap-1.5 text-[11px] text-emerald-400/90 mr-1">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              autosaveStatus === 'saving' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'
+            }`}
+          />
+          {autosaveStatus === 'saving' ? 'กำลังบันทึก...' : 'บันทึกแล้ว'}
+        </span>
+
+        <button
+          onClick={onToggleMinimap}
+          className={`flex items-center gap-1 px-2 py-1 rounded text-xs border transition cursor-pointer ${
+            showMinimap
+              ? 'bg-slate-800 border-slate-600 text-slate-100'
+              : 'bg-[#17202b] border-slate-800 text-slate-400 hover:text-slate-200'
+          }`}
+          title="เปิด/ปิดแผนที่ย่อ"
+        >
+          <MapIcon className="w-3.5 h-3.5" />
+        </button>
+
+        <button
+          onClick={onQuickGenerateWorld}
+          className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold text-xs transition shadow-sm cursor-pointer"
+          title="สุ่มสร้างโลกใหม่ทั้งแผนที่ตามหลักภูมิศาสตร์จริง"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>สร้างโลก</span>
+        </button>
+      </div>
+    </header>
+  );
+};

@@ -1,0 +1,173 @@
+import { SpecialFeatureMeta } from '../types/map';
+
+export const SPECIAL_FEATURES: SpecialFeatureMeta[] = [
+  {
+    id: 'oasis',
+    nameTh: 'โอเอซิส',
+    color: '#4da38b',
+    placement: 'land',
+    moveCostDelta: -0.2,
+    goodsBonus: ['spices', 'tea', 'wheat'],
+  },
+  {
+    id: 'mangrove',
+    nameTh: 'ป่าชายเลน',
+    color: '#3f6b4b',
+    placement: 'coast',
+    moveCostDelta: 0.7,
+    goodsBonus: ['fish', 'timber', 'herbs'],
+  },
+  {
+    id: 'volcanic_soil',
+    nameTh: 'ดินภูเขาไฟ',
+    color: '#8c5643',
+    placement: 'land',
+    moveCostDelta: 0.1,
+    goodsBonus: ['wine', 'wheat', 'arcane'],
+  },
+  {
+    id: 'hot_springs',
+    nameTh: 'บ่อน้ำร้อน',
+    color: '#8cc4db',
+    placement: 'land',
+    moveCostDelta: 0.1,
+    goodsBonus: ['herbs', 'salt'],
+  },
+  {
+    id: 'salt_flats',
+    nameTh: 'แหล่งเกลือ',
+    color: '#e5dfd0',
+    placement: 'land',
+    moveCostDelta: 0.2,
+    goodsBonus: ['salt'],
+  },
+  {
+    id: 'peat_bog',
+    nameTh: 'บึงพรุ',
+    color: '#635542',
+    placement: 'land',
+    moveCostDelta: 2.0,
+    goodsBonus: ['herbs'],
+  },
+  {
+    id: 'fertile_meadow',
+    nameTh: 'ทุ่งหญ้าชั้นดี',
+    color: '#9ec65c',
+    placement: 'land',
+    moveCostDelta: -0.1,
+    goodsBonus: ['wheat', 'wine', 'leather'],
+  },
+  {
+    id: 'coral_reef',
+    nameTh: 'แนวปะการัง',
+    color: '#df8393',
+    placement: 'water',
+    moveCostDelta: 0.4,
+    goodsBonus: ['fish', 'gems'],
+  },
+  {
+    id: 'cave',
+    nameTh: 'ถ้ำ',
+    color: '#565460',
+    placement: 'land',
+    moveCostDelta: 0.3,
+    goodsBonus: ['iron', 'gems', 'arcane'],
+  },
+  {
+    id: 'canyon',
+    nameTh: 'หุบผาชัน',
+    color: '#a85b3c',
+    placement: 'land',
+    moveCostDelta: 6.5,
+    goodsBonus: ['iron', 'gold'],
+  },
+  {
+    id: 'atoll',
+    nameTh: 'เกาะปะการังวงแหวน',
+    color: '#7bd1c8',
+    placement: 'water',
+    moveCostDelta: 0.2,
+    goodsBonus: ['fish', 'gems'],
+  },
+  {
+    id: 'lagoon',
+    nameTh: 'ลากูน',
+    color: '#5ac0cc',
+    placement: 'water',
+    moveCostDelta: 0.0,
+    goodsBonus: ['fish', 'salt'],
+  },
+  {
+    id: 'volcanic_island',
+    nameTh: 'เกาะภูเขาไฟ',
+    color: '#6c4f47',
+    placement: 'water',
+    moveCostDelta: 0.6,
+    goodsBonus: ['arcane', 'gems'],
+  },
+  {
+    id: 'floodplain',
+    nameTh: 'ที่ราบลุ่มน้ำ',
+    color: '#7eb35d',
+    placement: 'land',
+    moveCostDelta: -0.1,
+    goodsBonus: ['wheat', 'tea'],
+  },
+  {
+    id: 'river_delta',
+    nameTh: 'สามเหลี่ยมปากแม่น้ำ',
+    color: '#92bd69',
+    placement: 'coast',
+    moveCostDelta: 0.2,
+    goodsBonus: ['wheat', 'fish'],
+  },
+  {
+    id: 'fjord',
+    nameTh: 'ฟยอร์ด',
+    color: '#4f6f87',
+    placement: 'coast',
+    moveCostDelta: 0.8,
+    goodsBonus: ['fish', 'timber'],
+  },
+  {
+    id: 'karst',
+    nameTh: 'ภูเขาหินปูน',
+    color: '#86967a',
+    placement: 'land',
+    moveCostDelta: 1.5,
+    goodsBonus: ['marble'],
+  },
+  {
+    id: 'mesa',
+    nameTh: 'ที่ราบสูงยอดตัด',
+    color: '#b0744a',
+    placement: 'land',
+    moveCostDelta: 1.2,
+    goodsBonus: ['gold', 'iron'],
+  },
+  {
+    id: 'sea_islets',
+    nameTh: 'หมู่เกาะกลางทะเล',
+    color: '#6ca367',
+    placement: 'water',
+    moveCostDelta: 0.25,
+    goodsBonus: ['fish', 'spices'],
+  },
+  {
+    id: 'cliff',
+    nameTh: 'หน้าผา',
+    color: '#78716c',
+    placement: 'land',
+    moveCostDelta: 6.5,
+    goodsBonus: ['marble', 'gems'],
+  },
+];
+
+export const FEATURE_BY_ID: Record<string, SpecialFeatureMeta> = Object.fromEntries(
+  SPECIAL_FEATURES.map((f) => [f.id, f])
+);
+
+export function getFeatureMeta(id: string): SpecialFeatureMeta | null {
+  if (!id) return null;
+  return FEATURE_BY_ID[id] ?? null;
+}
