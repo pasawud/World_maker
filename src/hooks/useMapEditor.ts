@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
 import { CITY_TIERS } from '../data/goods';
+import { getTerrainMeta } from '../data/terrains';
 import { autoDetectCliffsFromElevation, syncShallowWater } from '../engine/cliffs';
 import {
   findHexPath,
   floodFillHexes,
   getHexBrush,
+  getHexTerrain,
   hexDistance,
   hexIndex,
   isCoastalHex,
@@ -49,6 +51,7 @@ import {
   PoiType,
   Religion,
   RoadType,
+  TerrainId,
   ToolMode,
   TradeMode,
   TravelSpeedId,
@@ -68,6 +71,7 @@ export function useMapEditor() {
   const [redoStack, setRedoStack] = useState<HexMapData[]>([]);
 
   const [tool, setTool] = useState<ToolMode>('view');
+  const [activeTerrain, setActiveTerrain] = useState<TerrainId>(TerrainId.PLAINS);
   const [activeBiome, setActiveBiome] = useState<number>(BiomeId.GRASSLAND);
   // null = paint biome; '' = erase special feature; non-empty = paint special feature id
   const [activeFeature, setActiveFeature] = useState<string | null>(null);
@@ -163,6 +167,7 @@ export function useMapEditor() {
     setMap((cur) => {
       strokeSnapshotRef.current = {
         ...cur,
+        terrains: [...(cur.terrains ?? cur.biomes.map((_, i) => getHexTerrain(cur, i)))],
         biomes: [...cur.biomes],
         elevation: [...cur.elevation],
         features: [...cur.features],
@@ -241,6 +246,7 @@ export function useMapEditor() {
               {
                 width: prev.width,
                 height: prev.height,
+                terrains: prev.terrains,
                 biomes: prev.biomes,
                 elevation: prev.elevation,
                 features: nextFeatures,
@@ -251,6 +257,7 @@ export function useMapEditor() {
             markHexesDirty([...changedHexes, ...synced.changedHexes]);
             return {
               ...prev,
+              terrains: synced.terrains,
               biomes: synced.biomes,
               elevation: synced.elevation,
               features: synced.features,
@@ -260,8 +267,21 @@ export function useMapEditor() {
           return { ...prev, features: nextFeatures };
         }
 
-        // Normal biome painting
-        const meta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+        // Physical Terrain (landform / water) painting — preserves existing land biomes!
+        const tMeta = getTerrainMeta(activeTerrain);
+        const curActiveBMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+        const fallbackLandBiome =
+          !curActiveBMeta.isWater &&
+          activeBiome !== BiomeId.HILLS &&
+          activeBiome !== BiomeId.HIGHLAND &&
+          activeBiome !== BiomeId.MOUNTAIN &&
+          activeBiome !== BiomeId.SNOW_PEAK
+            ? activeBiome
+            : BiomeId.GRASSLAND;
+
+        const nextTerrains = [
+          ...(prev.terrains ?? prev.biomes.map((_, i) => getHexTerrain(prev, i))),
+        ];
         const nextBiomes = [...prev.biomes];
         const nextElev = [...prev.elevation];
         const nextTerr = [...prev.territories];
@@ -270,20 +290,26 @@ export function useMapEditor() {
         const nextFeat = [...prev.features];
         let changed = false;
         const changedHexes: HexCoord[] = [];
+
         for (const h of brush) {
           const idx = hexIndex(h.q, h.r, prev.width);
-          if (nextBiomes[idx] !== activeBiome) {
-            nextBiomes[idx] = activeBiome;
-            nextElev[idx] = meta.defaultElevation;
-            if (meta.isWater) {
+          const curT = getHexTerrain(prev, idx);
+          const curIsWater = isWaterBiome(nextBiomes[idx], prev.customBiomes);
+          if (curT !== activeTerrain || curIsWater !== tMeta.isWater) {
+            nextTerrains[idx] = activeTerrain;
+            nextElev[idx] = tMeta.defaultElevation;
+            if (tMeta.isWater) {
+              nextBiomes[idx] =
+                activeTerrain === TerrainId.DEEP_OCEAN ? BiomeId.DEEP_OCEAN : BiomeId.SHALLOW_WATER;
               nextTerr[idx] = '';
               nextRel[idx] = '';
               nextCult[idx] = '';
+            } else if (curIsWater) {
+              nextBiomes[idx] = fallbackLandBiome;
             }
-            // Clear incompatible feature if land<->water flipped
             if (nextFeat[idx]) {
               const fm = getFeatureMeta(nextFeat[idx]);
-              if (fm && ((fm.placement === 'water') !== meta.isWater)) {
+              if (fm && (fm.placement === 'water') !== tMeta.isWater) {
                 nextFeat[idx] = '';
               }
             }
@@ -294,13 +320,14 @@ export function useMapEditor() {
         if (!changed) return prev;
         if (autoShallowWater) {
           const preserveIndices =
-            activeBiome === BiomeId.SHALLOW_WATER
+            activeTerrain === TerrainId.SHALLOW_WATER
               ? new Set(changedHexes.map((h) => hexIndex(h.q, h.r, prev.width)))
               : undefined;
           const synced = syncShallowWater(
             {
               width: prev.width,
               height: prev.height,
+              terrains: nextTerrains,
               biomes: nextBiomes,
               elevation: nextElev,
               features: nextFeat,
@@ -311,6 +338,7 @@ export function useMapEditor() {
           markHexesDirty([...changedHexes, ...synced.changedHexes]);
           return {
             ...prev,
+            terrains: synced.terrains,
             biomes: synced.biomes,
             elevation: synced.elevation,
             territories: nextTerr,
@@ -322,6 +350,7 @@ export function useMapEditor() {
         markHexesDirty(changedHexes);
         return {
           ...prev,
+          terrains: nextTerrains,
           biomes: nextBiomes,
           elevation: nextElev,
           territories: nextTerr,
@@ -332,7 +361,117 @@ export function useMapEditor() {
       });
       return warning ? { warning } : {};
     },
-    [activeBiome, activeFeature, autoShallowWater, brushSize, markHexesDirty]
+    [activeBiome, activeFeature, activeTerrain, autoShallowWater, brushSize, markHexesDirty]
+  );
+
+  const paintBiomeAt = useCallback(
+    (q: number, r: number): { warning?: string } => {
+      let warning: string | undefined;
+      setMap((prev) => {
+        const brush = getHexBrush(q, r, brushSize - 1, prev.width, prev.height);
+        if (brush.length === 0) return prev;
+        const bMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+
+        if (!bMeta.isWater) {
+          const nextBiomes = [...prev.biomes];
+          let changed = false;
+          let skippedWater = 0;
+          const changedHexes: HexCoord[] = [];
+          for (const h of brush) {
+            const idx = hexIndex(h.q, h.r, prev.width);
+            if (isWaterHex(prev, h.q, h.r)) {
+              skippedWater++;
+              continue;
+            }
+            if (nextBiomes[idx] !== activeBiome) {
+              nextBiomes[idx] = activeBiome;
+              changed = true;
+              changedHexes.push(h);
+            }
+          }
+          if (!changed && skippedWater > 0) {
+            warning = 'ไบโอมบนบกระบายได้เฉพาะบนพื้นดิน (ใช้เครื่องมือ "ภูมิประเทศ" เพื่อสร้างแผ่นดินก่อน)';
+            return prev;
+          }
+          if (!changed) return prev;
+          markHexesDirty(changedHexes);
+          return { ...prev, biomes: nextBiomes };
+        }
+
+        // Custom water biome painting
+        const nextTerrains = [
+          ...(prev.terrains ?? prev.biomes.map((_, i) => getHexTerrain(prev, i))),
+        ];
+        const nextBiomes = [...prev.biomes];
+        const nextElev = [...prev.elevation];
+        const nextTerr = [...prev.territories];
+        const nextRel = [...prev.religions];
+        const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
+        const nextFeat = [...prev.features];
+        let changed = false;
+        const changedHexes: HexCoord[] = [];
+
+        for (const h of brush) {
+          const idx = hexIndex(h.q, h.r, prev.width);
+          if (nextBiomes[idx] !== activeBiome) {
+            const wasWater = isWaterBiome(nextBiomes[idx], prev.customBiomes);
+            nextBiomes[idx] = activeBiome;
+            if (!wasWater) {
+              nextTerrains[idx] = TerrainId.SHALLOW_WATER;
+              nextElev[idx] = bMeta.defaultElevation;
+              nextTerr[idx] = '';
+              nextRel[idx] = '';
+              nextCult[idx] = '';
+              if (nextFeat[idx]) {
+                const fm = getFeatureMeta(nextFeat[idx]);
+                if (fm && fm.placement !== 'water') nextFeat[idx] = '';
+              }
+            }
+            changed = true;
+            changedHexes.push(h);
+          }
+        }
+        if (!changed) return prev;
+        if (autoShallowWater) {
+          const synced = syncShallowWater(
+            {
+              width: prev.width,
+              height: prev.height,
+              terrains: nextTerrains,
+              biomes: nextBiomes,
+              elevation: nextElev,
+              features: nextFeat,
+              customBiomes: prev.customBiomes,
+            },
+            { changedHexes }
+          );
+          markHexesDirty([...changedHexes, ...synced.changedHexes]);
+          return {
+            ...prev,
+            terrains: synced.terrains,
+            biomes: synced.biomes,
+            elevation: synced.elevation,
+            territories: nextTerr,
+            religions: nextRel,
+            cultures: nextCult,
+            features: synced.features,
+          };
+        }
+        markHexesDirty(changedHexes);
+        return {
+          ...prev,
+          terrains: nextTerrains,
+          biomes: nextBiomes,
+          elevation: nextElev,
+          territories: nextTerr,
+          religions: nextRel,
+          cultures: nextCult,
+          features: nextFeat,
+        };
+      });
+      return warning ? { warning } : {};
+    },
+    [activeBiome, autoShallowWater, brushSize, markHexesDirty]
   );
 
   const paintTerritoryAt = useCallback(
@@ -416,6 +555,7 @@ export function useMapEditor() {
     if (!snap) return;
     setMap((cur) => {
       const diff =
+        (cur.terrains ?? []).some((v, i) => v !== (snap.terrains ?? [])[i]) ||
         cur.biomes.some((v, i) => v !== snap.biomes[i]) ||
         cur.features.some((v, i) => v !== snap.features[i]) ||
         cur.territories.some((v, i) => v !== snap.territories[i]) ||
@@ -432,40 +572,60 @@ export function useMapEditor() {
   const floodFillAt = useCallback(
     (q: number, r: number) => {
       commitMapChange((prev) => {
-        const targets = floodFillHexes(prev.biomes, prev.width, prev.height, q, r);
+        const baseTerrains =
+          prev.terrains ?? prev.biomes.map((_, i) => getHexTerrain(prev, i));
+        const targets = floodFillHexes(baseTerrains, prev.width, prev.height, q, r);
         if (targets.length === 0) return prev;
-        const meta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+        const tMeta = getTerrainMeta(activeTerrain);
+        const curActiveBMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+        const fallbackLandBiome =
+          !curActiveBMeta.isWater &&
+          activeBiome !== BiomeId.HILLS &&
+          activeBiome !== BiomeId.HIGHLAND &&
+          activeBiome !== BiomeId.MOUNTAIN &&
+          activeBiome !== BiomeId.SNOW_PEAK
+            ? activeBiome
+            : BiomeId.GRASSLAND;
+
+        const nextTerrains = [...baseTerrains];
         const nextBiomes = [...prev.biomes];
         const nextElev = [...prev.elevation];
         const nextTerr = [...prev.territories];
         const nextRel = [...prev.religions];
         const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
         const nextFeat = [...prev.features];
+
         for (const h of targets) {
           const idx = hexIndex(h.q, h.r, prev.width);
-          nextBiomes[idx] = activeBiome;
-          nextElev[idx] = meta.defaultElevation;
-          if (meta.isWater) {
+          const curIsWater = isWaterBiome(nextBiomes[idx], prev.customBiomes);
+          nextTerrains[idx] = activeTerrain;
+          nextElev[idx] = tMeta.defaultElevation;
+          if (tMeta.isWater) {
+            nextBiomes[idx] =
+              activeTerrain === TerrainId.DEEP_OCEAN ? BiomeId.DEEP_OCEAN : BiomeId.SHALLOW_WATER;
             nextTerr[idx] = '';
             nextRel[idx] = '';
             nextCult[idx] = '';
+          } else if (curIsWater) {
+            nextBiomes[idx] = fallbackLandBiome;
           }
           if (nextFeat[idx]) {
             const fm = getFeatureMeta(nextFeat[idx]);
-            if (fm && (fm.placement === 'water') !== meta.isWater) {
+            if (fm && (fm.placement === 'water') !== tMeta.isWater) {
               nextFeat[idx] = '';
             }
           }
         }
         if (autoShallowWater) {
           const preserveIndices =
-            activeBiome === BiomeId.SHALLOW_WATER
+            activeTerrain === TerrainId.SHALLOW_WATER
               ? new Set(targets.map((h) => hexIndex(h.q, h.r, prev.width)))
               : undefined;
           const synced = syncShallowWater(
             {
               width: prev.width,
               height: prev.height,
+              terrains: nextTerrains,
               biomes: nextBiomes,
               elevation: nextElev,
               features: nextFeat,
@@ -476,6 +636,7 @@ export function useMapEditor() {
           markHexesDirty([...targets, ...synced.changedHexes]);
           return {
             ...prev,
+            terrains: synced.terrains,
             biomes: synced.biomes,
             elevation: synced.elevation,
             territories: nextTerr,
@@ -487,6 +648,7 @@ export function useMapEditor() {
         markHexesDirty(targets);
         return {
           ...prev,
+          terrains: nextTerrains,
           biomes: nextBiomes,
           elevation: nextElev,
           territories: nextTerr,
@@ -496,7 +658,75 @@ export function useMapEditor() {
         };
       });
     },
-    [activeBiome, autoShallowWater, commitMapChange, markHexesDirty]
+    [activeBiome, activeTerrain, autoShallowWater, commitMapChange, markHexesDirty]
+  );
+
+  const floodFillBiomeAt = useCallback(
+    (q: number, r: number) => {
+      commitMapChange((prev) => {
+        const bMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+        if (!bMeta.isWater) {
+          if (isWaterHex(prev, q, r)) return prev;
+          const targets = floodFillHexes(
+            prev.biomes,
+            prev.width,
+            prev.height,
+            q,
+            r,
+            12000,
+            (idx) => !isWaterBiome(prev.biomes[idx], prev.customBiomes)
+          );
+          if (targets.length === 0) return prev;
+          const nextBiomes = [...prev.biomes];
+          for (const h of targets) {
+            nextBiomes[hexIndex(h.q, h.r, prev.width)] = activeBiome;
+          }
+          markHexesDirty(targets);
+          return { ...prev, biomes: nextBiomes };
+        }
+
+        const targets = floodFillHexes(prev.biomes, prev.width, prev.height, q, r);
+        if (targets.length === 0) return prev;
+        const nextTerrains = [
+          ...(prev.terrains ?? prev.biomes.map((_, i) => getHexTerrain(prev, i))),
+        ];
+        const nextBiomes = [...prev.biomes];
+        const nextElev = [...prev.elevation];
+        const nextTerr = [...prev.territories];
+        const nextRel = [...prev.religions];
+        const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
+        const nextFeat = [...prev.features];
+
+        for (const h of targets) {
+          const idx = hexIndex(h.q, h.r, prev.width);
+          const wasWater = isWaterBiome(nextBiomes[idx], prev.customBiomes);
+          nextBiomes[idx] = activeBiome;
+          if (!wasWater) {
+            nextTerrains[idx] = TerrainId.SHALLOW_WATER;
+            nextElev[idx] = bMeta.defaultElevation;
+            nextTerr[idx] = '';
+            nextRel[idx] = '';
+            nextCult[idx] = '';
+            if (nextFeat[idx]) {
+              const fm = getFeatureMeta(nextFeat[idx]);
+              if (fm && fm.placement !== 'water') nextFeat[idx] = '';
+            }
+          }
+        }
+        markHexesDirty(targets);
+        return {
+          ...prev,
+          terrains: nextTerrains,
+          biomes: nextBiomes,
+          elevation: nextElev,
+          territories: nextTerr,
+          religions: nextRel,
+          cultures: nextCult,
+          features: nextFeat,
+        };
+      });
+    },
+    [activeBiome, commitMapChange, markHexesDirty]
   );
 
   const floodFillTerritoryAt = useCallback(
@@ -864,6 +1094,7 @@ export function useMapEditor() {
       if (!res.changed) return prev;
       return {
         ...prev,
+        terrains: res.terrains,
         biomes: res.biomes,
         elevation: res.elevation,
         features: res.features,
@@ -876,6 +1107,7 @@ export function useMapEditor() {
       const res = autoDetectCliffsFromElevation(prev);
       return {
         ...prev,
+        terrains: res.terrains,
         biomes: res.biomes,
         elevation: res.elevation,
         features: res.features,
@@ -905,6 +1137,7 @@ export function useMapEditor() {
       const total = prev.width * prev.height;
       return {
         ...prev,
+        terrains: new Array<number>(total).fill(TerrainId.DEEP_OCEAN),
         biomes: new Array<number>(total).fill(BiomeId.DEEP_OCEAN),
         elevation: new Array<number>(total).fill(-0.65),
         features: new Array<string>(total).fill(''),
@@ -938,7 +1171,7 @@ export function useMapEditor() {
       );
       setActiveBiome(newBiome.id);
       setActiveFeature(null);
-      setTool('terrain');
+      setTool('biome');
       return newBiome;
     },
     [commitMapChange, map.customBiomes]
@@ -1163,6 +1396,8 @@ export function useMapEditor() {
     redo,
     tool,
     setTool,
+    activeTerrain,
+    setActiveTerrain,
     activeBiome,
     setActiveBiome,
     activeFeature,
@@ -1221,11 +1456,13 @@ export function useMapEditor() {
     markAllDirty,
     beginStroke,
     paintTerrainAt,
+    paintBiomeAt,
     paintTerritoryAt,
     paintReligionAt,
     paintCultureAt,
     endStroke,
     floodFillAt,
+    floodFillBiomeAt,
     floodFillTerritoryAt,
     floodFillReligionAt,
     floodFillCultureAt,

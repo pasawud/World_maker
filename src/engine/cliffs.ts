@@ -4,9 +4,11 @@ import {
   HexCoord,
   HexMapData,
   RiverPath,
+  TerrainId,
 } from '../types/map';
 import {
   getHexBrush,
+  getHexTerrain,
   getNeighbors,
   getNeighborsWithEdge,
   hexIndex,
@@ -21,6 +23,7 @@ export interface SyncShallowWaterOptions {
 }
 
 export interface SyncShallowWaterResult {
+  terrains: number[];
   biomes: number[];
   elevation: number[];
   features: string[];
@@ -108,11 +111,17 @@ export function getCliffEdges(
  * Custom water biomes (id >= 100) and land tiles are never overwritten.
  */
 export function syncShallowWater(
-  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'elevation' | 'features' | 'customBiomes'>,
+  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'elevation' | 'features' | 'customBiomes'> & {
+    terrains?: number[];
+  },
   options?: SyncShallowWaterOptions
 ): SyncShallowWaterResult {
   const { width, height, biomes, elevation, features, customBiomes } = map;
   const total = width * height;
+  const baseTerrains =
+    map.terrains && map.terrains.length === total
+      ? map.terrains
+      : biomes.map((_, i) => getHexTerrain({ biomes, customBiomes }, i));
 
   let candidateIndices: number[];
   if (options?.changedHexes && options.changedHexes.length > 0) {
@@ -133,6 +142,7 @@ export function syncShallowWater(
     for (let i = 0; i < total; i++) candidateIndices[i] = i;
   }
 
+  let nextTerrains: number[] | null = null;
   let nextBiomes: number[] | null = null;
   let nextElevation: number[] | null = null;
   let nextFeatures: string[] | null = null;
@@ -168,10 +178,13 @@ export function syncShallowWater(
       : BiomeId.DEEP_OCEAN;
 
     if (curB !== targetBiome) {
+      if (!nextTerrains) nextTerrains = [...baseTerrains];
       if (!nextBiomes) nextBiomes = [...biomes];
       if (!nextElevation) nextElevation = [...elevation];
       if (!nextFeatures) nextFeatures = [...features];
 
+      nextTerrains[idx] =
+        targetBiome === BiomeId.DEEP_OCEAN ? TerrainId.DEEP_OCEAN : TerrainId.SHALLOW_WATER;
       nextBiomes[idx] = targetBiome;
       const curElev = nextElevation[idx] ?? -0.5;
       if (targetBiome === BiomeId.DEEP_OCEAN) {
@@ -189,6 +202,7 @@ export function syncShallowWater(
 
   if (!nextBiomes) {
     return {
+      terrains: baseTerrains,
       biomes,
       elevation,
       features,
@@ -198,6 +212,7 @@ export function syncShallowWater(
   }
 
   return {
+    terrains: nextTerrains!,
     biomes: nextBiomes,
     elevation: nextElevation!,
     features: nextFeatures!,
@@ -218,7 +233,8 @@ export function generateNaturalCliffs(
   features: string[],
   rivers: RiverPath[],
   seed: number,
-  customBiomes?: CustomBiome[]
+  customBiomes?: CustomBiome[],
+  terrains?: number[]
 ): { features: string[]; elevation: number[] } {
   const nextFeatures = [...features];
   const nextElevation = [...elevation];
@@ -242,6 +258,7 @@ export function generateNaturalCliffs(
       if (isWaterBiome(b, customBiomes)) continue;
       if (nextFeatures[idx] !== '') continue;
 
+      const t = getHexTerrain({ biomes, terrains, customBiomes }, idx);
       const e = nextElevation[idx] ?? 0;
       const nbs = getNeighbors(q, r, width, height);
       let touchesWater = false;
@@ -260,16 +277,19 @@ export function generateNaturalCliffs(
       const cliffNoise = nCliff.fbm((q / Math.max(1, width)) * 6.5, (r / Math.max(1, height)) * 6.5, 3);
 
       if (touchesWater && !mouthSet.has(idx) && b !== BiomeId.SWAMP && b !== BiomeId.SNOW_ICE) {
-        const highCoastal = e >= 0.40 || b === BiomeId.MOUNTAIN || b === BiomeId.SNOW_PEAK;
+        const highCoastal = e >= 0.40 || t === TerrainId.MOUNTAIN || t === TerrainId.HIGH_PEAK;
         const hillyCliff =
-          (e >= 0.24 || b === BiomeId.HILLS || b === BiomeId.HIGHLAND) && cliffNoise > 0.14;
+          (e >= 0.24 || t === TerrainId.HILLS || t === TerrainId.HIGHLAND) && cliffNoise > 0.14;
         if (highCoastal || hillyCliff) {
           nextFeatures[idx] = 'cliff';
           nextElevation[idx] = Math.max(e, 0.34);
         }
       } else if (
         !touchesWater &&
-        (b === BiomeId.HIGHLAND || b === BiomeId.HILLS || b === BiomeId.MOUNTAIN)
+        (t === TerrainId.HIGHLAND ||
+          t === TerrainId.HILLS ||
+          t === TerrainId.MOUNTAIN ||
+          t === TerrainId.HIGH_PEAK)
       ) {
         if (Number.isFinite(minLandNbElev) && e - minLandNbElev >= 0.26 && cliffNoise > 0.22) {
           nextFeatures[idx] = 'cliff';
@@ -286,8 +306,10 @@ export function generateNaturalCliffs(
  * steep hills/elevations) to mark as cliffs, then synchronize shallow water around all coastlines.
  */
 export function autoDetectCliffsFromElevation(
-  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'elevation' | 'features' | 'customBiomes'>
-): { features: string[]; elevation: number[]; biomes: number[]; changedHexes: HexCoord[] } {
+  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'elevation' | 'features' | 'customBiomes'> & {
+    terrains?: number[];
+  }
+): { terrains: number[]; features: string[]; elevation: number[]; biomes: number[]; changedHexes: HexCoord[] } {
   const { width, height, biomes, elevation, features, customBiomes } = map;
   const nextFeatures = [...features];
   const nextElevation = [...elevation];
@@ -305,12 +327,13 @@ export function autoDetectCliffsFromElevation(
       );
       if (!touchesWater) continue;
 
+      const t = getHexTerrain(map, idx);
       const elev = nextElevation[idx] ?? 0;
       const isSteepCoast =
-        b === BiomeId.MOUNTAIN ||
-        b === BiomeId.SNOW_PEAK ||
-        b === BiomeId.HIGHLAND ||
-        (b === BiomeId.HILLS && elev >= 0.42) ||
+        t === TerrainId.MOUNTAIN ||
+        t === TerrainId.HIGH_PEAK ||
+        t === TerrainId.HIGHLAND ||
+        (t === TerrainId.HILLS && elev >= 0.42) ||
         elev >= 0.42;
 
       if (isSteepCoast) {
@@ -324,6 +347,7 @@ export function autoDetectCliffsFromElevation(
   const synced = syncShallowWater({
     width,
     height,
+    terrains: map.terrains,
     biomes,
     elevation: nextElevation,
     features: nextFeatures,
@@ -331,6 +355,7 @@ export function autoDetectCliffsFromElevation(
   });
 
   return {
+    terrains: synced.terrains,
     biomes: synced.biomes,
     elevation: synced.elevation,
     features: synced.features,

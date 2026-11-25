@@ -9,13 +9,14 @@ import {
   Landmark,
   Map as MapIcon,
   MapPin,
+  Mountain,
   MousePointer2,
-  Paintbrush,
   Redo2,
   Route,
   Ruler,
   Sparkles,
   Store,
+  Trees,
   Undo2,
   Waves,
 } from 'lucide-react';
@@ -40,7 +41,8 @@ interface TopBarProps {
 
 const TOOL_ITEMS: { id: ToolMode; label: string; icon: React.ReactNode; shortcut: string }[] = [
   { id: 'view', label: 'ดูแผนที่', icon: <MousePointer2 className="w-3.5 h-3.5" />, shortcut: '1' },
-  { id: 'terrain', label: 'ระบายภูมิประเทศ', icon: <Paintbrush className="w-3.5 h-3.5" />, shortcut: '2' },
+  { id: 'terrain', label: 'ภูมิประเทศ', icon: <Mountain className="w-3.5 h-3.5" />, shortcut: '2' },
+  { id: 'biome', label: 'ไบโอม', icon: <Trees className="w-3.5 h-3.5" />, shortcut: 'B' },
   { id: 'river', label: 'วาดแม่น้ำ', icon: <Waves className="w-3.5 h-3.5" />, shortcut: '3' },
   { id: 'city', label: 'วางเมือง', icon: <Building2 className="w-3.5 h-3.5" />, shortcut: '4' },
   { id: 'territory', label: 'ดินแดน', icon: <Crown className="w-3.5 h-3.5" />, shortcut: '5' },

@@ -42,7 +42,9 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
         <label className="block text-[11px] text-slate-400 mb-1">มุมมองชั้นข้อมูลแผนที่</label>
         <div className="grid grid-cols-3 gap-1">
           {[
-            { id: 'none', label: 'ไบโอมปกติ' },
+            { id: 'none', label: 'ปกติ (ผสม)' },
+            { id: 'terrain', label: 'ภูมิประเทศ' },
+            { id: 'biome', label: 'ไบโอม' },
             { id: 'political', label: 'การปกครอง' },
             { id: 'religion', label: 'ศาสนา' },
             { id: 'culture', label: 'วัฒนธรรม' },

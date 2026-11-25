@@ -1,6 +1,14 @@
 import { DEFAULT_CULTURES, DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
-import { BiomeId, City, CustomCategoryType, HexMapData, Kingdom, WorldTimeline } from '../types/map';
-import { findHexPath, hexIndex } from './hexMath';
+import {
+  BiomeId,
+  City,
+  CustomCategoryType,
+  HexMapData,
+  Kingdom,
+  TerrainId,
+  WorldTimeline,
+} from '../types/map';
+import { findHexPath, getHexTerrain, hexIndex, isWaterBiome } from './hexMath';
 import {
   generateCulturesFromCities,
   generateReligionsFromCities,
@@ -134,6 +142,46 @@ export function parseMapFromJson(raw: string): HexMapData {
   const customBiomes = Array.isArray(obj.customBiomes)
     ? (obj.customBiomes as HexMapData['customBiomes'])
     : [];
+  const elevation = ensureFloatArray(obj.elevation, 0);
+  const temperature = ensureFloatArray(obj.temperature, 18);
+  const moisture = ensureFloatArray(obj.moisture, 0.45);
+
+  let terrains: number[];
+  if (Array.isArray(obj.terrains) && obj.terrains.length === expectedLen) {
+    terrains = obj.terrains.map((t) => {
+      const n = Number(t);
+      return Number.isInteger(n) && n >= TerrainId.DEEP_OCEAN && n <= TerrainId.HIGH_PEAK
+        ? n
+        : TerrainId.DEEP_OCEAN;
+    });
+  } else {
+    // Legacy JSON migration: extract physical landforms into terrains & replace legacy landform biomes with pure land biomes
+    terrains = new Array<number>(expectedLen);
+    for (let i = 0; i < expectedLen; i++) {
+      const b = biomes[i];
+      if (b === BiomeId.DEEP_OCEAN) {
+        terrains[i] = TerrainId.DEEP_OCEAN;
+      } else if (b === BiomeId.SHALLOW_WATER) {
+        terrains[i] = TerrainId.SHALLOW_WATER;
+      } else if (isWaterBiome(b, customBiomes)) {
+        terrains[i] = TerrainId.SHALLOW_WATER;
+      } else if (b === BiomeId.SNOW_PEAK) {
+        terrains[i] = TerrainId.HIGH_PEAK;
+        biomes[i] = BiomeId.SNOW_ICE;
+      } else if (b === BiomeId.MOUNTAIN) {
+        terrains[i] = TerrainId.MOUNTAIN;
+        biomes[i] = temperature[i] <= 0 ? BiomeId.SNOW_ICE : BiomeId.TUNDRA;
+      } else if (b === BiomeId.HIGHLAND) {
+        terrains[i] = TerrainId.HIGHLAND;
+        biomes[i] = moisture[i] < 0.32 ? BiomeId.SAVANNA : BiomeId.GRASSLAND;
+      } else if (b === BiomeId.HILLS) {
+        terrains[i] = TerrainId.HILLS;
+        biomes[i] = BiomeId.GRASSLAND;
+      } else {
+        terrains[i] = TerrainId.PLAINS;
+      }
+    }
+  }
   const customPoiTypes = Array.isArray(obj.customPoiTypes)
     ? (obj.customPoiTypes as HexMapData['customPoiTypes'])
     : [];
@@ -197,10 +245,11 @@ export function parseMapFromJson(raw: string): HexMapData {
       moistureScale: Number(geoRaw.moistureScale) || 1,
       riverThreshold: Number(geoRaw.riverThreshold) || 20,
     },
+    terrains,
     biomes,
-    elevation: ensureFloatArray(obj.elevation, 0),
-    temperature: ensureFloatArray(obj.temperature, 18),
-    moisture: ensureFloatArray(obj.moisture, 0.45),
+    elevation,
+    temperature,
+    moisture,
     features,
     territories,
     religions,
@@ -281,6 +330,7 @@ export function resizeMap(
   }
 
   const total = safeW * safeH;
+  const terrains = new Array<number>(total).fill(TerrainId.DEEP_OCEAN);
   const biomes = new Array<number>(total).fill(BiomeId.DEEP_OCEAN);
   const elevation = new Array<number>(total).fill(-0.6);
   const temperature = new Array<number>(total).fill(15);
@@ -297,6 +347,7 @@ export function resizeMap(
     for (let q = 0; q < copyW; q++) {
       const oldIdx = hexIndex(q, r, map.width);
       const newIdx = hexIndex(q, r, safeW);
+      terrains[newIdx] = getHexTerrain(map, oldIdx);
       biomes[newIdx] = map.biomes[oldIdx];
       elevation[newIdx] = map.elevation[oldIdx];
       temperature[newIdx] = map.temperature[oldIdx];
@@ -333,6 +384,7 @@ export function resizeMap(
     width: safeW,
     height: safeH,
     hexSizeKm: safeKm,
+    terrains,
     biomes,
     elevation,
     temperature,

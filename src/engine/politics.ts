@@ -1,7 +1,7 @@
 import { getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
-import { BiomeId, CityTier, HexMapData } from '../types/map';
-import { getNeighbors, hexIndex, isWaterBiome } from './hexMath';
+import { BiomeId, CityTier, HexMapData, TerrainId } from '../types/map';
+import { getHexTerrain, getNeighbors, hexIndex, isWaterBiome } from './hexMath';
 
 function tierMaxRadiusCost(tier: CityTier, pop: number): number {
   const popBonus = Math.min(18, Math.sqrt(Math.max(1000, pop)) * 0.045);
@@ -28,7 +28,7 @@ export function generateTerritoriesFromCities(
   map: Pick<
     HexMapData,
     'width' | 'height' | 'biomes' | 'customBiomes' | 'features' | 'cities' | 'roads'
-  >
+  > & { terrains?: number[] }
 ): string[] {
   const { width, height, biomes, customBiomes, features, cities, roads } = map;
   const total = width * height;
@@ -113,10 +113,11 @@ export function generateTerritoriesFromCities(
       const meta = getBiomeMetaWithCustom(b, customBiomes);
       if (meta.isWater) continue;
 
+      const t = getHexTerrain(map, nbIdx);
       let step = 1.0;
-      if (b === BiomeId.SNOW_PEAK) step = 8.5;
-      else if (b === BiomeId.MOUNTAIN) step = 4.8;
-      else if (b === BiomeId.HILLS || b === BiomeId.HIGHLAND) step = 1.7;
+      if (t === TerrainId.HIGH_PEAK) step = 8.5;
+      else if (t === TerrainId.MOUNTAIN) step = 4.8;
+      else if (t === TerrainId.HILLS || t === TerrainId.HIGHLAND) step = 1.7;
       else if (b === BiomeId.DESERT || b === BiomeId.SWAMP) step = 1.8;
       else step = Math.min(2.2, meta.moveCost);
 
@@ -147,7 +148,7 @@ export function generateReligionsFromCities(
   map: Pick<
     HexMapData,
     'width' | 'height' | 'biomes' | 'customBiomes' | 'cities' | 'roads'
-  >
+  > & { terrains?: number[] }
 ): string[] {
   const { width, height, biomes, customBiomes, cities, roads } = map;
   const total = width * height;
@@ -230,7 +231,8 @@ export function generateReligionsFromCities(
       const meta = getBiomeMetaWithCustom(b, customBiomes);
       if (meta.isWater) continue;
 
-      let step = b === BiomeId.SNOW_PEAK ? 6.0 : b === BiomeId.MOUNTAIN ? 3.5 : 1.15;
+      const t = getHexTerrain(map, nbIdx);
+      let step = t === TerrainId.HIGH_PEAK ? 6.0 : t === TerrainId.MOUNTAIN ? 3.5 : 1.15;
       if (roadBonus[nbIdx]) step *= 0.65;
 
       const nextCost = cost + step;
@@ -255,7 +257,7 @@ export function generateCulturesFromCities(
   map: Pick<
     HexMapData,
     'width' | 'height' | 'biomes' | 'customBiomes' | 'features' | 'cities' | 'roads'
-  >
+  > & { terrains?: number[] }
 ): string[] {
   const { width, height, biomes, customBiomes, features, cities, roads } = map;
   const total = width * height;
@@ -339,10 +341,11 @@ export function generateCulturesFromCities(
       const meta = getBiomeMetaWithCustom(b, customBiomes);
       if (meta.isWater) continue;
 
+      const t = getHexTerrain(map, nbIdx);
       let step = 1.15;
-      if (b === BiomeId.SNOW_PEAK) step = 7.0;
-      else if (b === BiomeId.MOUNTAIN) step = 4.0;
-      else if (b === BiomeId.HILLS || b === BiomeId.HIGHLAND) step = 1.5;
+      if (t === TerrainId.HIGH_PEAK) step = 7.0;
+      else if (t === TerrainId.MOUNTAIN) step = 4.0;
+      else if (t === TerrainId.HILLS || t === TerrainId.HIGHLAND) step = 1.5;
 
       const featId = features?.[nbIdx];
       if (featId === 'cliff' || featId === 'canyon') step += 2.5;

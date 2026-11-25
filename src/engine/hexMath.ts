@@ -1,11 +1,13 @@
-import { getBiomeMetaWithCustom } from '../data/biomes';
+import { getBiomeMetaWithCustom, LEGACY_TERRAIN_BIOME_IDS } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
+import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
 import {
   BiomeId,
   CustomBiome,
   HexCoord,
   HexMapData,
   RoadType,
+  TerrainId,
   TradeMode,
 } from '../types/map';
 
@@ -240,6 +242,48 @@ export function isWaterBiome(biomeId: number, customBiomes?: CustomBiome[]): boo
   return getBiomeMetaWithCustom(biomeId, customBiomes).isWater;
 }
 
+export function getHexTerrain(
+  map: { biomes: number[]; customBiomes?: CustomBiome[]; terrains?: number[] },
+  idx: number
+): TerrainId {
+  const b = map.biomes[idx];
+  if (b === BiomeId.DEEP_OCEAN) return TerrainId.DEEP_OCEAN;
+  if (b === BiomeId.SHALLOW_WATER) return TerrainId.SHALLOW_WATER;
+  if (isWaterBiome(b, map.customBiomes)) {
+    return map.terrains?.[idx] === TerrainId.DEEP_OCEAN
+      ? TerrainId.DEEP_OCEAN
+      : TerrainId.SHALLOW_WATER;
+  }
+  if (b === BiomeId.SNOW_PEAK) return TerrainId.HIGH_PEAK;
+  if (b === BiomeId.MOUNTAIN) return TerrainId.MOUNTAIN;
+  if (b === BiomeId.HIGHLAND) return TerrainId.HIGHLAND;
+  if (b === BiomeId.HILLS) return TerrainId.HILLS;
+
+  const t = map.terrains?.[idx];
+  if (t !== undefined && t >= TerrainId.PLAINS && t <= TerrainId.HIGH_PEAK) {
+    return t as TerrainId;
+  }
+  return TerrainId.PLAINS;
+}
+
+export function getCombinedMoveCost(
+  terrainId: TerrainId,
+  biomeId: number,
+  customBiomes?: CustomBiome[]
+): number {
+  const biomeMeta = getBiomeMetaWithCustom(biomeId, customBiomes);
+  if (isWaterTerrain(terrainId) || biomeMeta.isWater) return Infinity;
+
+  let terrainCost = getTerrainMeta(terrainId).moveCost;
+  if (terrainId === TerrainId.HIGH_PEAK) terrainCost = Math.max(terrainCost, 48);
+  else if (terrainId === TerrainId.MOUNTAIN) terrainCost = Math.max(terrainCost, 18);
+
+  const biomeDelta = LEGACY_TERRAIN_BIOME_IDS.has(biomeId)
+    ? 0
+    : Math.max(0, biomeMeta.moveCost - 1.0);
+  return terrainCost + biomeDelta;
+}
+
 export function isWaterHex(
   map: Pick<HexMapData, 'width' | 'biomes' | 'customBiomes'>,
   q: number,
@@ -407,13 +451,9 @@ export function findHexPath(
 
   const landCostForCell = (curIdx: number, nbIdx: number): number => {
     const b = biomes[nbIdx];
-    const meta = getBiomeMetaWithCustom(b, customBiomes);
-    if (meta.isWater) return Infinity;
-
-    let base = meta.moveCost;
-    // Extra natural mountain-avoidance & slope cost so roads hug valleys & passes
-    if (b === BiomeId.SNOW_PEAK) base = Math.max(base, 48);
-    else if (b === BiomeId.MOUNTAIN) base = Math.max(base, 18);
+    const terrain = getHexTerrain(map, nbIdx);
+    let base = getCombinedMoveCost(terrain, b, customBiomes);
+    if (!Number.isFinite(base)) return Infinity;
 
     const feat = features?.[nbIdx] ? getFeatureMeta(features[nbIdx]) : null;
     if (feat) base = Math.max(0.6, base + feat.moveCostDelta);
@@ -432,8 +472,9 @@ export function findHexPath(
 
   const stepCost = (curIdx: number, nbIdx: number, isEndpoint: boolean): number => {
     const b = biomes[nbIdx];
+    const terrain = getHexTerrain(map, nbIdx);
     const meta = getBiomeMetaWithCustom(b, customBiomes);
-    const isWater = meta.isWater;
+    const isWater = meta.isWater || isWaterTerrain(terrain);
 
     if (mode === 'sea') {
       // Strictly water-only between ports/coastal endpoints!
@@ -442,7 +483,7 @@ export function findHexPath(
       }
       const feat = features?.[nbIdx] ? getFeatureMeta(features[nbIdx]) : null;
       const featDelta = feat ? feat.moveCostDelta : 0;
-      const baseWater = b === BiomeId.SHALLOW_WATER ? 0.75 : 0.9;
+      const baseWater = terrain === TerrainId.SHALLOW_WATER ? 0.75 : 0.9;
       return baseWater + Math.max(0, featDelta);
     }
 
@@ -452,7 +493,7 @@ export function findHexPath(
 
     // mixed mode
     if (isWater) {
-      return b === BiomeId.SHALLOW_WATER ? 0.8 : 0.95;
+      return terrain === TerrainId.SHALLOW_WATER ? 0.8 : 0.95;
     }
     return landCostForCell(curIdx, nbIdx);
   };

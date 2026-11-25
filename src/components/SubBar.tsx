@@ -28,7 +28,9 @@ interface SubBarProps {
 }
 
 const OVERLAY_MODES: { id: ClimateOverlay; label: string }[] = [
-  { id: 'none', label: 'ภูมิประเทศ' },
+  { id: 'none', label: 'ปกติ' },
+  { id: 'terrain', label: 'ภูมิประเทศ' },
+  { id: 'biome', label: 'ไบโอม' },
   { id: 'political', label: 'การปกครอง' },
   { id: 'religion', label: 'ศาสนา' },
   { id: 'culture', label: 'วัฒนธรรม' },

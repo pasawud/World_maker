@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getFeatureMeta } from '../../data/features';
-import { BiomeId, City } from '../../types/map';
+import { BiomeId, City, TerrainId } from '../../types/map';
 import {
   autoDetectCliffsFromElevation,
   getCliffEdges,
@@ -12,6 +12,7 @@ import {
   computeRealDimensions,
   cubeToOffset,
   findHexPath,
+  getCombinedMoveCost,
   getNeighbors,
   hexDistance,
   hexIndex,
@@ -38,8 +39,10 @@ import {
 } from '../timeline';
 import { computeCityTradeOverview, estimateRouteTradeValue } from '../trade';
 import {
+  autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
+  recomputeBiomesFromCurrentMap,
   simulateClimate,
 } from '../worldGenerator';
 
@@ -836,5 +839,150 @@ describe('Deep Lore Custom Types, Timeline Snapshots & City Blueprint Generator'
         expect(pointInPolygon({ x: cx, y: cy }, geom1.waterPolygon!)).toBe(false);
       }
     }
+  });
+});
+
+describe('Separated Terrain & Biome System', () => {
+  it('generateWorld populates map.terrains separately and never outputs legacy terrain IDs in map.biomes', () => {
+    const map = generateWorld(70, 50, 25, DEFAULT_GEOGRAPHY_CONFIG);
+    expect(map.terrains).toHaveLength(70 * 50);
+
+    const legacyTerrainBiomes = new Set([
+      BiomeId.HILLS,
+      BiomeId.HIGHLAND,
+      BiomeId.MOUNTAIN,
+      BiomeId.SNOW_PEAK,
+    ]);
+    for (let i = 0; i < map.biomes.length; i++) {
+      expect(legacyTerrainBiomes.has(map.biomes[i])).toBe(false);
+    }
+
+    expect(map.terrains.some((t) => t === TerrainId.MOUNTAIN || t === TerrainId.HIGH_PEAK)).toBe(
+      true
+    );
+    expect(map.terrains.some((t) => t === TerrainId.PLAINS)).toBe(true);
+  });
+
+  it('combines arbitrary terrain and biome for pathfinding avoidance and movement cost', () => {
+    const w = 14;
+    const h = 12;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.DESERT);
+    map.elevation = new Array<number>(w * h).fill(0.14);
+    map.features = new Array<string>(w * h).fill('');
+    map.roads = [];
+
+    // Paint a vertical mountain range with DESERT biome (desert mountains!)
+    for (let r = 0; r <= 8; r++) {
+      const idx = hexIndex(6, r, w);
+      map.terrains[idx] = TerrainId.MOUNTAIN;
+      map.elevation[idx] = 0.68;
+    }
+
+    const res = findHexPath(map, { q: 2, r: 3 }, { q: 10, r: 3 }, 'land');
+    expect(res.reachable).toBe(true);
+    const crossedMountain = res.hexes.some(
+      (pt) => map.terrains[hexIndex(pt.q, pt.r, w)] === TerrainId.MOUNTAIN
+    );
+    expect(crossedMountain).toBe(false);
+
+    expect(getCombinedMoveCost(TerrainId.HILLS, BiomeId.TAIGA)).toBeGreaterThan(
+      getCombinedMoveCost(TerrainId.PLAINS, BiomeId.GRASSLAND)
+    );
+    expect(getCombinedMoveCost(TerrainId.MOUNTAIN, BiomeId.DESERT)).toBeGreaterThanOrEqual(18);
+  });
+
+  it('recomputeBiomesFromCurrentMap preserves sculpted terrains while updating land biomes from climate', () => {
+    const w = 24;
+    const h = 18;
+    const map = generateWorld(w, h, 25, DEFAULT_GEOGRAPHY_CONFIG);
+    map.terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.14);
+    map.features = new Array<string>(w * h).fill('');
+
+    // Ocean edge on left, mountain ridge down middle, hills on east
+    for (let r = 0; r < h; r++) {
+      for (let q = 0; q < 4; q++) {
+        const idx = hexIndex(q, r, w);
+        map.terrains[idx] = TerrainId.DEEP_OCEAN;
+        map.biomes[idx] = BiomeId.DEEP_OCEAN;
+        map.elevation[idx] = -0.65;
+      }
+      const mIdx = hexIndex(10, r, w);
+      map.terrains[mIdx] = TerrainId.MOUNTAIN;
+      const hIdx = hexIndex(16, r, w);
+      map.terrains[hIdx] = TerrainId.HILLS;
+    }
+
+    const updated = recomputeBiomesFromCurrentMap({
+      ...map,
+      geography: { ...map.geography, latNorth: 75, latSouth: 20, windMode: 'west' },
+    });
+
+    // Sculpted terrains are preserved
+    expect(updated.terrains[hexIndex(0, 5, w)]).toBe(TerrainId.DEEP_OCEAN);
+    expect(updated.terrains[hexIndex(10, 5, w)]).toBe(TerrainId.MOUNTAIN);
+    expect(updated.terrains[hexIndex(16, 5, w)]).toBe(TerrainId.HILLS);
+    // Mountain biomes were classified by climate rather than stuck as legacy BiomeId.MOUNTAIN
+    expect(updated.biomes[hexIndex(10, 5, w)]).not.toBe(BiomeId.MOUNTAIN);
+    expect(updated.biomes[hexIndex(16, 5, w)]).not.toBe(BiomeId.HILLS);
+  });
+
+  it('autoSuggestGoodsForCity combines mountain/hill minerals from terrains with forest goods from biomes', () => {
+    const w = 15;
+    const h = 15;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.features = new Array<string>(w * h).fill('');
+    map.rivers = [];
+
+    // Ring around (7, 7): put HILLS/MOUNTAIN terrains covered by DECIDUOUS_FOREST biome!
+    for (let dq = -2; dq <= 2; dq++) {
+      for (let dr = -2; dr <= 2; dr++) {
+        const q = 7 + dq;
+        const r = 7 + dr;
+        const idx = hexIndex(q, r, w);
+        map.terrains[idx] = TerrainId.HILLS;
+        map.biomes[idx] = BiomeId.DECIDUOUS_FOREST;
+      }
+    }
+
+    const goods = autoSuggestGoodsForCity(map, 7, 7);
+    expect(goods.producedGoods).toContain('timber');
+    expect(goods.producedGoods).toContain('iron');
+  });
+
+  it('round-trips terrains in JSON serialization, migrates legacy JSON, and preserves terrains on resize', () => {
+    const map = generateWorld(40, 30, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+    expect(restored.terrains).toEqual(map.terrains);
+
+    // Legacy JSON without `terrains` containing MOUNTAIN / SNOW_PEAK / HILLS / HIGHLAND in `biomes`
+    const legacyObj = JSON.parse(json) as Record<string, unknown>;
+    delete legacyObj.terrains;
+    const legacyBiomes = new Array<number>(40 * 30).fill(BiomeId.GRASSLAND);
+    legacyBiomes[hexIndex(2, 2, 40)] = BiomeId.SNOW_PEAK;
+    legacyBiomes[hexIndex(3, 2, 40)] = BiomeId.MOUNTAIN;
+    legacyBiomes[hexIndex(4, 2, 40)] = BiomeId.HIGHLAND;
+    legacyBiomes[hexIndex(5, 2, 40)] = BiomeId.HILLS;
+    legacyBiomes[hexIndex(6, 2, 40)] = BiomeId.DEEP_OCEAN;
+    legacyObj.biomes = legacyBiomes;
+
+    const migrated = parseMapFromJson(JSON.stringify(legacyObj));
+    expect(migrated.terrains[hexIndex(2, 2, 40)]).toBe(TerrainId.HIGH_PEAK);
+    expect(migrated.biomes[hexIndex(2, 2, 40)]).toBe(BiomeId.SNOW_ICE);
+    expect(migrated.terrains[hexIndex(3, 2, 40)]).toBe(TerrainId.MOUNTAIN);
+    expect(migrated.biomes[hexIndex(3, 2, 40)]).not.toBe(BiomeId.MOUNTAIN);
+    expect(migrated.terrains[hexIndex(4, 2, 40)]).toBe(TerrainId.HIGHLAND);
+    expect(migrated.terrains[hexIndex(5, 2, 40)]).toBe(TerrainId.HILLS);
+    expect(migrated.terrains[hexIndex(6, 2, 40)]).toBe(TerrainId.DEEP_OCEAN);
+
+    const resized = resizeMap(restored, 45, 35, 25, 'preserve');
+    expect(resized.terrains).toHaveLength(45 * 35);
+    expect(resized.terrains[hexIndex(10, 10, 45)]).toBe(restored.terrains[hexIndex(10, 10, 40)]);
   });
 });

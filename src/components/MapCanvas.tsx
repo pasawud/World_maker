@@ -16,11 +16,14 @@ import {
 import { getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMeta } from '../data/features';
 import { getAllGovernmentTypes, getAllPoiTypes } from '../data/goods';
+import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
 import {
   findHexPath,
+  getHexTerrain,
   hexDistance,
   hexIndex,
   inBounds,
+  isWaterBiome,
   pixelToHex,
   SQRT3,
   validateRoadStep,
@@ -34,12 +37,15 @@ import {
   LayerVisibility,
   PoiType,
   RoadType,
+  TerrainId,
   ToolMode,
 } from '../types/map';
 
 interface MapCanvasProps {
   map: HexMapData;
   tool: ToolMode;
+  activeTerrain: TerrainId;
+  onSelectTerrain: (t: TerrainId) => void;
   activeBiome: number;
   onSelectBiome: (b: number) => void;
   activeFeature: string | null;
@@ -77,6 +83,7 @@ interface MapCanvasProps {
   dirtyHexQueue: React.MutableRefObject<HexCoord[] | 'all'>;
   onBeginStroke: () => void;
   onPaintTerrainAt: (q: number, r: number) => { warning?: string };
+  onPaintBiomeAt: (q: number, r: number) => { warning?: string };
   onPaintTerritoryAt: (q: number, r: number, erase?: boolean) => void;
   onFloodFillTerritoryAt: (q: number, r: number, erase?: boolean) => void;
   onPaintReligionAt: (q: number, r: number, erase?: boolean) => void;
@@ -85,6 +92,7 @@ interface MapCanvasProps {
   onFloodFillCultureAt: (q: number, r: number, erase?: boolean) => void;
   onEndStroke: () => void;
   onFloodFillAt: (q: number, r: number) => void;
+  onFloodFillBiomeAt: (q: number, r: number) => void;
   onPlaceOrSelectCityAt: (q: number, r: number) => void;
   onTradeClickAt: (q: number, r: number) => void;
   onAddManualRiver: (points: { q: number; r: number; flux: number }[]) => void;
@@ -101,6 +109,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const {
     map,
     tool,
+    activeTerrain,
+    onSelectTerrain,
     activeBiome,
     onSelectBiome,
     activeFeature,
@@ -138,6 +148,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     dirtyHexQueue,
     onBeginStroke,
     onPaintTerrainAt,
+    onPaintBiomeAt,
     onPaintTerritoryAt,
     onFloodFillTerritoryAt,
     onPaintReligionAt,
@@ -146,6 +157,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onFloodFillCultureAt,
     onEndStroke,
     onFloodFillAt,
+    onFloodFillBiomeAt,
     onPlaceOrSelectCityAt,
     onTradeClickAt,
     onAddManualRiver,
@@ -339,9 +351,18 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     for (let r = 0; r < map.height; r++) {
       for (let q = 0; q < map.width; q++) {
         const idx = hexIndex(q, r, map.width);
-        let color = getBiomeMetaWithCustom(map.biomes[idx], map.customBiomes).color;
-        if (climateOverlay === 'none' && map.features?.[idx] === 'cliff') {
-          color = '#574e46';
+        const tId = getHexTerrain(map, idx);
+        const bMeta = getBiomeMetaWithCustom(map.biomes[idx], map.customBiomes);
+        let color =
+          climateOverlay === 'terrain'
+            ? getTerrainMeta(tId).color
+            : bMeta.isWater && !bMeta.isCustom
+            ? getTerrainMeta(tId).color
+            : bMeta.color;
+        if (climateOverlay === 'none') {
+          if (tId === TerrainId.MOUNTAIN) color = '#766b5d';
+          else if (tId === TerrainId.HIGH_PEAK) color = '#b8c4cf';
+          if (map.features?.[idx] === 'cliff') color = '#574e46';
         }
         if (climateOverlay === 'political' && map.territories?.[idx]) {
           color = map.kingdoms.find((k) => k.id === map.territories[idx])?.color ?? color;
@@ -421,9 +442,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
 
     if (tool === 'terrain') {
       if (terrainSubTool === 'eyedropper') {
-        const b = map.biomes[hexIndex(h.q, h.r, map.width)];
+        const t = getHexTerrain(map, hexIndex(h.q, h.r, map.width));
         onClearActiveFeature();
-        onSelectBiome(b);
+        onSelectTerrain(t);
         onChangeTerrainSubTool('brush');
       } else if (terrainSubTool === 'fill' && activeFeature === null) {
         onFloodFillAt(h.q, h.r);
@@ -431,6 +452,23 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         isPaintingRef.current = true;
         onBeginStroke();
         const res = onPaintTerrainAt(h.q, h.r);
+        if (res.warning) warnOnce(res.warning);
+      }
+    } else if (tool === 'biome') {
+      if (terrainSubTool === 'eyedropper') {
+        const b = map.biomes[hexIndex(h.q, h.r, map.width)];
+        if (!isWaterBiome(b, map.customBiomes) || b >= 100) {
+          onSelectBiome(b);
+          onChangeTerrainSubTool('brush');
+        } else {
+          warnOnce('ช่องนี้เป็นทะเล (ใช้เครื่องมือ "ภูมิประเทศ" เพื่อดูดสีพื้นน้ำ)');
+        }
+      } else if (terrainSubTool === 'fill') {
+        onFloodFillBiomeAt(h.q, h.r);
+      } else {
+        isPaintingRef.current = true;
+        onBeginStroke();
+        const res = onPaintBiomeAt(h.q, h.r);
         if (res.warning) warnOnce(res.warning);
       }
     } else if (tool === 'territory') {
@@ -551,6 +589,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     if (tool === 'terrain' && (terrainSubTool === 'brush' || activeFeature !== null)) {
       const res = onPaintTerrainAt(h.q, h.r);
       if (res.warning) warnOnce(res.warning);
+    } else if (tool === 'biome' && terrainSubTool === 'brush') {
+      const res = onPaintBiomeAt(h.q, h.r);
+      if (res.warning) warnOnce(res.warning);
     } else if (tool === 'territory' && territorySubTool !== 'fill') {
       onPaintTerritoryAt(h.q, h.r, territorySubTool === 'erase');
     } else if (tool === 'religion' && religionSubTool !== 'fill') {
@@ -590,7 +631,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     }
     if (isPaintingRef.current) {
       isPaintingRef.current = false;
-      if (tool === 'terrain' || tool === 'territory' || tool === 'religion' || tool === 'culture') {
+      if (
+        tool === 'terrain' ||
+        tool === 'biome' ||
+        tool === 'territory' ||
+        tool === 'religion' ||
+        tool === 'culture'
+      ) {
         onEndStroke();
       } else if (tool === 'river' && riverSubTool === 'draw') {
         const pts = draftPathRef.current;
@@ -634,6 +681,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const hoverInfo = useMemo(() => {
     if (!hoverHex) return null;
     const idx = hexIndex(hoverHex.q, hoverHex.r, map.width);
+    const terrain = getTerrainMeta(getHexTerrain(map, idx));
     const biome = getBiomeMetaWithCustom(map.biomes[idx], map.customBiomes);
     const feat = map.features?.[idx] ? getFeatureMeta(map.features[idx]) : null;
     const kingdomId = map.territories?.[idx] ?? '';
@@ -650,9 +698,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const temp = map.temperature[idx] ?? 15;
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
     const city = map.cities.find((c) => c.q === hoverHex.q && c.r === hoverHex.r);
-    return { biome, feat, kingdom, govLabel, religion, culture, elevM, temp, moist, city };
+    return { terrain, biome, feat, kingdom, govLabel, religion, culture, elevM, temp, moist, city };
   }, [hoverHex, map]);
 
+  const activeTerrainMeta = getTerrainMeta(activeTerrain);
   const activeBiomeMeta = getBiomeMetaWithCustom(activeBiome, map.customBiomes);
   const activeFeatureMeta = activeFeature ? getFeatureMeta(activeFeature) : null;
   const allPoiTypes = useMemo(() => getAllPoiTypes(map.customPoiTypes), [map.customPoiTypes]);
@@ -693,9 +742,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                 <span className="flex items-center gap-1.5 text-slate-200 font-medium">
                   <span
                     className="w-3.5 h-3.5 rounded-sm border border-white/25"
-                    style={{ backgroundColor: activeBiomeMeta.color }}
+                    style={{ backgroundColor: activeTerrainMeta.color }}
                   />
-                  {activeBiomeMeta.nameTh}
+                  ภูมิประเทศ: {activeTerrainMeta.nameTh}
                 </span>
               )}
               <div className="h-4 w-px bg-slate-700" />
@@ -730,7 +779,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                       ? 'bg-amber-500/25 text-amber-300'
                       : 'text-slate-400'
                   }`}
-                  title="ดูดสีไบโอม"
+                  title="ดูดสีภูมิประเทศ"
                 >
                   <Pipette className="w-3.5 h-3.5" />
                 </button>
@@ -770,6 +819,67 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                 <Waves className="w-3.5 h-3.5" />
                 <span>น้ำตื้นอัตโนมัติ</span>
               </button>
+            </>
+          )}
+
+          {tool === 'biome' && (
+            <>
+              <span className="flex items-center gap-1.5 text-emerald-200 font-medium">
+                <span
+                  className="w-3.5 h-3.5 rounded-sm border border-white/25"
+                  style={{ backgroundColor: activeBiomeMeta.color }}
+                />
+                ไบโอม: {activeBiomeMeta.nameTh}
+              </span>
+              <div className="h-4 w-px bg-slate-700" />
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onChangeTerrainSubTool('brush')}
+                  className={`p-1 rounded cursor-pointer ${
+                    terrainSubTool === 'brush'
+                      ? 'bg-emerald-500/25 text-emerald-300'
+                      : 'text-slate-400'
+                  }`}
+                  title="พู่กันระบายไบโอม"
+                >
+                  <Paintbrush className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => onChangeTerrainSubTool('fill')}
+                  className={`p-1 rounded cursor-pointer ${
+                    terrainSubTool === 'fill'
+                      ? 'bg-emerald-500/25 text-emerald-300'
+                      : 'text-slate-400'
+                  }`}
+                  title="เทสีไบโอมต่อเนื่อง"
+                >
+                  <PaintBucket className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => onChangeTerrainSubTool('eyedropper')}
+                  className={`p-1 rounded cursor-pointer ${
+                    terrainSubTool === 'eyedropper'
+                      ? 'bg-emerald-500/25 text-emerald-300'
+                      : 'text-slate-400'
+                  }`}
+                  title="ดูดสีไบโอม"
+                >
+                  <Pipette className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="h-4 w-px bg-slate-700" />
+              <span className="text-slate-400">ขนาดพู่กัน: {brushSize}</span>
+              <input
+                type="range"
+                min={1}
+                max={6}
+                value={brushSize}
+                onChange={(e) => onChangeBrushSize(Number(e.target.value))}
+                className="w-20"
+              />
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                ระบายเฉพาะบนพื้นดิน (คงรูปทรงภูมิประเทศเดิม)
+              </span>
             </>
           )}
 
@@ -985,10 +1095,20 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           <span className="flex items-center gap-1 font-medium text-amber-200">
             <span
               className="w-2.5 h-2.5 rounded-xs"
-              style={{ backgroundColor: hoverInfo.biome.color }}
+              style={{ backgroundColor: hoverInfo.terrain.color }}
             />
-            {hoverInfo.biome.nameTh}
+            {hoverInfo.terrain.nameTh}
           </span>
+          {(!isWaterTerrain(hoverInfo.terrain.id) || hoverInfo.biome.isCustom) && (
+            <span className="flex items-center gap-1 font-medium text-emerald-300">
+              <span className="text-slate-500">·</span>
+              <span
+                className="w-2.5 h-2.5 rounded-xs"
+                style={{ backgroundColor: hoverInfo.biome.color }}
+              />
+              {hoverInfo.biome.nameTh}
+            </span>
+          )}
           {hoverInfo.feat && (
             <span className="flex items-center gap-1 text-emerald-300">
               <span

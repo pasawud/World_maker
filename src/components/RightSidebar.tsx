@@ -16,7 +16,7 @@ import {
   Upload,
   Waves,
 } from 'lucide-react';
-import { getAllBiomes } from '../data/biomes';
+import { getPaintableBiomes } from '../data/biomes';
 import { SPECIAL_FEATURES } from '../data/features';
 import {
   getAllCultureTypes,
@@ -25,14 +25,20 @@ import {
   getAllReligionTypes,
   TRAVEL_SPEEDS,
 } from '../data/goods';
-import { computeRealDimensions, findHexPath, realDistanceKm } from '../engine/hexMath';
+import { TERRAINS } from '../data/terrains';
+import {
+  computeRealDimensions,
+  findHexPath,
+  getHexTerrain,
+  isWaterBiome,
+  realDistanceKm,
+} from '../engine/hexMath';
 import {
   computeCultureStats,
   computeReligionStats,
   computeTerritoryStats,
 } from '../engine/politics';
 import {
-  BiomeId,
   City,
   ClimateOverlay,
   Culture,
@@ -44,6 +50,7 @@ import {
   Kingdom,
   Religion,
   ReligionType,
+  TerrainId,
   ToolMode,
   TradeMode,
   TravelSpeedId,
@@ -54,6 +61,8 @@ import { ClimateGeneratorPanel } from './ClimateGeneratorPanel';
 interface RightSidebarProps {
   map: HexMapData;
   tool: ToolMode;
+  activeTerrain: TerrainId;
+  onSelectTerrain: (t: TerrainId) => void;
   activeBiome: number;
   onSelectBiome: (b: number) => void;
   activeFeature: string | null;
@@ -114,6 +123,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
   const {
     map,
     tool,
+    activeTerrain,
+    onSelectTerrain,
     activeBiome,
     onSelectBiome,
     activeFeature,
@@ -170,7 +181,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onClearMap,
   } = props;
 
-  const allBiomes = useMemo(() => getAllBiomes(map.customBiomes), [map.customBiomes]);
+  const paintableBiomes = useMemo(() => getPaintableBiomes(map.customBiomes), [map.customBiomes]);
   const allPoiTypes = useMemo(() => getAllPoiTypes(map.customPoiTypes), [map.customPoiTypes]);
   const govTypes = useMemo(
     () => getAllGovernmentTypes(map.customGovernmentTypes),
@@ -185,6 +196,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     [map.customCultureTypes]
   );
 
+  const terrainCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (let i = 0; i < map.biomes.length; i++) {
+      const tId = getHexTerrain(map, i);
+      counts.set(tId, (counts.get(tId) ?? 0) + 1);
+    }
+    return counts;
+  }, [map]);
+
   const biomeCounts = useMemo(() => {
     const counts = new Map<number, number>();
     for (const b of map.biomes) counts.set(b, (counts.get(b) ?? 0) + 1);
@@ -194,10 +214,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
   const landHexCount = useMemo(() => {
     let n = 0;
     for (const b of map.biomes) {
-      if (b !== BiomeId.DEEP_OCEAN && b !== BiomeId.SHALLOW_WATER) n++;
+      if (!isWaterBiome(b, map.customBiomes)) n++;
     }
     return n;
-  }, [map.biomes]);
+  }, [map.biomes, map.customBiomes]);
 
   const dims = useMemo(
     () => computeRealDimensions(map.width, map.height, map.hexSizeKm),
@@ -1026,7 +1046,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
               onClick={() => onSelectFeature(null)}
               className="text-[10px] text-amber-300 hover:underline cursor-pointer"
             >
-              กลับไประบายไบโอม
+              กลับไประบายภูมิประเทศ
             </button>
           )}
         </div>
@@ -1107,10 +1127,48 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
         </div>
       </div>
 
-      {/* Biome Legend & Custom Biome Button */}
+      {/* Physical Terrain (Landforms & Water) */}
       <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-200">ภูมิประเทศ & ไบโอม</h3>
+          <h3 className="text-xs font-semibold text-slate-200">ภูมิประเทศ (Terrain)</h3>
+          <span className="text-[10px] text-slate-500">โครงสร้างพื้นผิว</span>
+        </div>
+
+        <div className="space-y-0.5">
+          {TERRAINS.map((t) => {
+            const count = terrainCounts.get(t.id) ?? 0;
+            const selected = tool === 'terrain' && activeFeature === null && activeTerrain === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => {
+                  onSelectFeature(null);
+                  onSelectTerrain(t.id);
+                }}
+                className={`w-full flex items-center justify-between px-2 py-1 rounded text-xs transition cursor-pointer ${
+                  selected
+                    ? 'bg-amber-500/18 border border-amber-500/60 text-amber-100'
+                    : 'hover:bg-[#1c2635] border border-transparent text-slate-300'
+                }`}
+              >
+                <span className="flex items-center gap-2 truncate">
+                  <span
+                    className="w-3.5 h-3.5 rounded-sm border border-white/20 shrink-0"
+                    style={{ backgroundColor: t.color }}
+                  />
+                  <span className="truncate">{t.nameTh}</span>
+                </span>
+                <span className="text-[11px] text-slate-400 tabular-nums ml-2">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Ecological Biomes & Custom Biome Button */}
+      <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-slate-200">ไบโอม (Biomes)</h3>
           <button
             onClick={() => onOpenCustomModal('biomes')}
             className="flex items-center gap-0.5 text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
@@ -1121,9 +1179,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
         </div>
 
         <div className="space-y-0.5 max-h-60 overflow-y-auto pr-0.5">
-          {allBiomes.map((b) => {
+          {paintableBiomes.map((b) => {
             const count = biomeCounts.get(b.id) ?? 0;
-            const selected = activeFeature === null && activeBiome === b.id;
+            const selected = tool === 'biome' && activeBiome === b.id;
             return (
               <button
                 key={b.id}
@@ -1133,7 +1191,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
                 }}
                 className={`w-full flex items-center justify-between px-2 py-1 rounded text-xs transition cursor-pointer ${
                   selected
-                    ? 'bg-amber-500/18 border border-amber-500/60 text-amber-100'
+                    ? 'bg-emerald-500/18 border border-emerald-500/60 text-emerald-100'
                     : 'hover:bg-[#1c2635] border border-transparent text-slate-300'
                 }`}
               >

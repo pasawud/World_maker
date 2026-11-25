@@ -64,6 +64,10 @@ export function App() {
         editor.toggleLayer('grid');
         return;
       }
+      if (e.key.toLowerCase() === 'b') {
+        editor.setTool('biome');
+        return;
+      }
       if (e.key === 'Escape') {
         editor.setTradeStartCityId(null);
         editor.setMeasurePoints([]);
@@ -162,6 +166,8 @@ export function App() {
           <MapCanvas
           map={editor.map}
           tool={editor.tool}
+          activeTerrain={editor.activeTerrain}
+          onSelectTerrain={editor.setActiveTerrain}
           activeBiome={editor.activeBiome}
           onSelectBiome={editor.setActiveBiome}
           activeFeature={editor.activeFeature}
@@ -201,6 +207,7 @@ export function App() {
           dirtyHexQueue={editor.dirtyHexQueue}
           onBeginStroke={editor.beginStroke}
           onPaintTerrainAt={editor.paintTerrainAt}
+          onPaintBiomeAt={editor.paintBiomeAt}
           onPaintTerritoryAt={editor.paintTerritoryAt}
           onFloodFillTerritoryAt={editor.floodFillTerritoryAt}
           onPaintReligionAt={editor.paintReligionAt}
@@ -209,6 +216,7 @@ export function App() {
           onFloodFillCultureAt={editor.floodFillCultureAt}
           onEndStroke={editor.endStroke}
           onFloodFillAt={editor.floodFillAt}
+          onFloodFillBiomeAt={editor.floodFillBiomeAt}
           onPlaceOrSelectCityAt={editor.placeOrSelectCityAt}
           onTradeClickAt={(q, r) => {
             const res = editor.handleTradeCityClick(q, r);
@@ -325,10 +333,15 @@ export function App() {
         <RightSidebar
           map={editor.map}
           tool={editor.tool}
+          activeTerrain={editor.activeTerrain}
+          onSelectTerrain={(t) => {
+            editor.setActiveTerrain(t);
+            if (editor.tool !== 'terrain') editor.setTool('terrain');
+          }}
           activeBiome={editor.activeBiome}
           onSelectBiome={(b) => {
             editor.setActiveBiome(b);
-            if (editor.tool === 'view') editor.setTool('terrain');
+            if (editor.tool !== 'biome') editor.setTool('biome');
           }}
           activeFeature={editor.activeFeature}
           onSelectFeature={(f) => {

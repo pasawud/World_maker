@@ -255,3 +255,33 @@ export function getAllBiomes(customBiomes?: CustomBiome[]): BiomeMeta[] {
   }));
   return [...BIOMES, ...customMetas];
 }
+
+export const LEGACY_TERRAIN_BIOME_IDS = new Set<number>([
+  BiomeId.DEEP_OCEAN,
+  BiomeId.SHALLOW_WATER,
+  BiomeId.HILLS,
+  BiomeId.HIGHLAND,
+  BiomeId.MOUNTAIN,
+  BiomeId.SNOW_PEAK,
+]);
+
+export const LAND_BIOMES: BiomeMeta[] = BIOMES.filter(
+  (b) => !LEGACY_TERRAIN_BIOME_IDS.has(b.id)
+);
+
+export function getPaintableBiomes(customBiomes?: CustomBiome[]): BiomeMeta[] {
+  if (!customBiomes || customBiomes.length === 0) return LAND_BIOMES;
+  const customMetas: BiomeMeta[] = customBiomes.map((cb) => ({
+    id: cb.id,
+    key: `custom_${cb.id}`,
+    nameTh: cb.nameTh,
+    nameEn: cb.nameEn || cb.nameTh,
+    color: cb.color,
+    isWater: cb.isWater,
+    defaultElevation: cb.defaultElevation,
+    moveCost: cb.moveCost,
+    detailStyle: cb.detailStyle,
+    isCustom: true,
+  }));
+  return [...LAND_BIOMES, ...customMetas];
+}

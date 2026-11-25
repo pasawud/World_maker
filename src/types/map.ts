@@ -1,3 +1,13 @@
+export enum TerrainId {
+  DEEP_OCEAN = 0,
+  SHALLOW_WATER = 1,
+  PLAINS = 2,
+  HILLS = 3,
+  HIGHLAND = 4,
+  MOUNTAIN = 5,
+  HIGH_PEAK = 6,
+}
+
 export enum BiomeId {
   DEEP_OCEAN = 0,
   SHALLOW_WATER = 1,
@@ -440,6 +450,7 @@ export interface HexMapData {
   height: number;
   hexSizeKm: number;
   geography: GeographyConfig;
+  terrains: number[]; // length = width * height (TerrainId)
   biomes: number[]; // length = width * height
   elevation: number[]; // -1 .. 1
   temperature: number[]; // deg C
@@ -469,6 +480,7 @@ export interface HexMapData {
 export type ToolMode =
   | 'view'
   | 'terrain'
+  | 'biome'
   | 'river'
   | 'city'
   | 'territory'
@@ -482,6 +494,8 @@ export type ToolMode =
 
 export type ClimateOverlay =
   | 'none'
+  | 'terrain'
+  | 'biome'
   | 'political'
   | 'religion'
   | 'culture'

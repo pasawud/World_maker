@@ -1,17 +1,20 @@
 import { DEFAULT_CULTURES, DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
 import { getFeatureMeta } from '../data/features';
+import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
 import {
   BiomeId,
   City,
   GeographyConfig,
   HexMapData,
   RiverPath,
+  TerrainId,
   TradeRoute,
 } from '../types/map';
 import { generateNaturalCliffs, syncShallowWater } from './cliffs';
 import {
   findHexPath,
   getHexBrush,
+  getHexTerrain,
   getNeighbors,
   hexDistance,
   hexIndex,
@@ -246,17 +249,15 @@ export function simulateClimate(
   return { temperature, moisture };
 }
 
-/** Classify every hex into a BiomeId using elevation, temperature, moisture, and river bonus. */
-export function classifyBiomesFromClimate(
+/** Classify every hex into a physical landform TerrainId from tectonic elevation and moisture. */
+export function classifyTerrainsFromElevation(
   elevation: ArrayLike<number>,
-  temperature: ArrayLike<number>,
-  moisture: ArrayLike<number>,
   width: number,
   height: number,
-  riverBonus?: ArrayLike<number>
+  moisture?: ArrayLike<number>
 ): number[] {
   const total = width * height;
-  const biomes = new Array<number>(total);
+  const terrains = new Array<number>(total);
 
   for (let r = 0; r < height; r++) {
     for (let q = 0; q < width; q++) {
@@ -270,6 +271,51 @@ export function classifyBiomesFromClimate(
             break;
           }
         }
+        terrains[idx] = touchesLand ? TerrainId.SHALLOW_WATER : TerrainId.DEEP_OCEAN;
+      } else if (e >= 0.72) {
+        terrains[idx] = TerrainId.HIGH_PEAK;
+      } else if (e >= 0.54) {
+        terrains[idx] = TerrainId.MOUNTAIN;
+      } else if (e >= 0.37) {
+        const m = moisture ? moisture[idx] : 0.5;
+        terrains[idx] = m < 0.34 || e >= 0.46 ? TerrainId.HIGHLAND : TerrainId.HILLS;
+      } else {
+        terrains[idx] = TerrainId.PLAINS;
+      }
+    }
+  }
+
+  return terrains;
+}
+
+/** Classify every hex into a climate/ecological BiomeId (independent of mountain/hill landform). */
+export function classifyBiomesFromClimate(
+  elevation: ArrayLike<number>,
+  temperature: ArrayLike<number>,
+  moisture: ArrayLike<number>,
+  width: number,
+  height: number,
+  riverBonus?: ArrayLike<number>,
+  terrains?: ArrayLike<number>
+): number[] {
+  const total = width * height;
+  const biomes = new Array<number>(total);
+
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) {
+      const idx = hexIndex(q, r, width);
+      const e = elevation[idx];
+      const terrainWater = terrains ? isWaterTerrain(terrains[idx]) : false;
+      if (e <= 0 || terrainWater) {
+        let touchesLand = false;
+        for (const nb of getNeighbors(q, r, width, height)) {
+          const nbIdx = hexIndex(nb.q, nb.r, width);
+          const nbWater = terrains ? isWaterTerrain(terrains[nbIdx]) : elevation[nbIdx] <= 0;
+          if (!nbWater && elevation[nbIdx] > 0) {
+            touchesLand = true;
+            break;
+          }
+        }
         biomes[idx] = touchesLand ? BiomeId.SHALLOW_WATER : BiomeId.DEEP_OCEAN;
         continue;
       }
@@ -277,14 +323,9 @@ export function classifyBiomesFromClimate(
       const t = temperature[idx];
       const rBonus = riverBonus ? riverBonus[idx] : 0;
       const m = Math.min(1, moisture[idx] + rBonus);
+      const isPlains = !terrains || terrains[idx] === TerrainId.PLAINS;
 
-      if (e >= 0.72 || (e >= 0.58 && t <= -4)) {
-        biomes[idx] = BiomeId.SNOW_PEAK;
-      } else if (e >= 0.54) {
-        biomes[idx] = BiomeId.MOUNTAIN;
-      } else if (e >= 0.37) {
-        biomes[idx] = m < 0.34 ? BiomeId.HIGHLAND : BiomeId.HILLS;
-      } else if (t <= -7) {
+      if (t <= -7) {
         biomes[idx] = BiomeId.SNOW_ICE;
       } else if (t <= 1.5) {
         biomes[idx] = m < 0.25 ? BiomeId.SNOW_ICE : BiomeId.TUNDRA;
@@ -293,13 +334,13 @@ export function classifyBiomesFromClimate(
         else if (m >= 0.24) biomes[idx] = BiomeId.GRASSLAND;
         else biomes[idx] = BiomeId.TUNDRA;
       } else if (t <= 19.5) {
-        if (e < 0.075 && m >= 0.68) biomes[idx] = BiomeId.SWAMP;
+        if (e < 0.075 && m >= 0.68 && isPlains) biomes[idx] = BiomeId.SWAMP;
         else if (m >= 0.62) biomes[idx] = BiomeId.DECIDUOUS_FOREST;
         else if (m >= 0.44) biomes[idx] = BiomeId.WINDWARD_PLAINS;
         else if (m >= 0.26) biomes[idx] = BiomeId.GRASSLAND;
         else biomes[idx] = BiomeId.DESERT;
       } else {
-        if (e < 0.08 && m >= 0.72) biomes[idx] = BiomeId.SWAMP;
+        if (e < 0.08 && m >= 0.72 && isPlains) biomes[idx] = BiomeId.SWAMP;
         else if (m >= 0.65) biomes[idx] = BiomeId.RAINFOREST;
         else if (m >= 0.48) biomes[idx] = BiomeId.DECIDUOUS_FOREST;
         else if (m >= 0.30) biomes[idx] = BiomeId.SAVANNA;
@@ -320,7 +361,8 @@ export function generateSpecialFeatures(
   temperature: number[],
   moisture: number[],
   rivers: RiverPath[],
-  seed: number
+  seed: number,
+  terrains?: number[]
 ): string[] {
   const total = width * height;
   const features = new Array<string>(total).fill('');
@@ -389,22 +431,26 @@ export function generateSpecialFeatures(
       }
 
       // Inland land features
-      if (b === BiomeId.DESERT) {
+      const tId = getHexTerrain({ biomes, terrains, customBiomes: [] }, idx);
+      if (tId === TerrainId.MOUNTAIN || tId === TerrainId.HIGH_PEAK) {
+        if (roll < 0.045) features[idx] = 'cave';
+        else if (roll < 0.072) features[idx] = 'hot_springs';
+        else if (roll < 0.095) features[idx] = 'volcanic_soil';
+      } else if (tId === TerrainId.HIGHLAND || tId === TerrainId.HILLS) {
+        if (m < 0.35 && roll < 0.065) features[idx] = 'canyon';
+        else if (m >= 0.45 && roll < 0.055) features[idx] = 'karst';
+      } else if (b === BiomeId.DESERT) {
         if (roll < 0.025) features[idx] = 'oasis';
         else if (roll < 0.042) features[idx] = 'salt_flats';
         else if (roll < 0.056) features[idx] = 'mesa';
       } else if (b === BiomeId.SWAMP) {
         if (roll < 0.18) features[idx] = 'peat_bog';
-      } else if (b === BiomeId.GRASSLAND || b === BiomeId.WINDWARD_PLAINS) {
+      } else if (
+        (b === BiomeId.GRASSLAND || b === BiomeId.WINDWARD_PLAINS) &&
+        tId === TerrainId.PLAINS
+      ) {
         if (riverSet.has(idx) && roll < 0.16) features[idx] = 'floodplain';
         else if (m >= 0.52 && roll < 0.045) features[idx] = 'fertile_meadow';
-      } else if (b === BiomeId.HIGHLAND || b === BiomeId.HILLS) {
-        if (m < 0.35 && roll < 0.065) features[idx] = 'canyon';
-        else if (m >= 0.45 && roll < 0.055) features[idx] = 'karst';
-      } else if (b === BiomeId.MOUNTAIN) {
-        if (roll < 0.045) features[idx] = 'cave';
-        else if (roll < 0.072) features[idx] = 'hot_springs';
-        else if (roll < 0.095) features[idx] = 'volcanic_soil';
       }
     }
   }
@@ -414,17 +460,23 @@ export function generateSpecialFeatures(
 
 /** Auto-suggest produced & demanded goods for a city from surrounding 3-hex geography + special features. */
 export function autoSuggestGoodsForCity(
-  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'rivers' | 'features'>,
+  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'rivers' | 'features'> & {
+    terrains?: number[];
+    customBiomes?: HexMapData['customBiomes'];
+  },
   q: number,
   r: number
 ): { producedGoods: string[]; demandedGoods: string[] } {
   const counts = new Map<number, number>();
+  const terrainCounts = new Map<number, number>();
   const featureBonuses: string[] = [];
   const ring = getHexBrush(q, r, 3, map.width, map.height);
   for (const h of ring) {
     const idx = hexIndex(h.q, h.r, map.width);
     const b = map.biomes[idx];
+    const t = getHexTerrain(map, idx);
     counts.set(b, (counts.get(b) ?? 0) + 1);
+    terrainCounts.set(t, (terrainCounts.get(t) ?? 0) + 1);
     const fId = map.features?.[idx];
     if (fId) {
       const fMeta = getFeatureMeta(fId);
@@ -436,12 +488,14 @@ export function autoSuggestGoodsForCity(
     riv.points.some((pt) => hexDistance({ q, r }, pt) <= 2)
   );
   const nearWater =
-    (counts.get(BiomeId.SHALLOW_WATER) ?? 0) + (counts.get(BiomeId.DEEP_OCEAN) ?? 0) > 0;
+    (terrainCounts.get(TerrainId.SHALLOW_WATER) ?? 0) +
+      (terrainCounts.get(TerrainId.DEEP_OCEAN) ?? 0) >
+    0;
   const mountains =
-    (counts.get(BiomeId.MOUNTAIN) ?? 0) +
-    (counts.get(BiomeId.SNOW_PEAK) ?? 0) +
-    (counts.get(BiomeId.HILLS) ?? 0) +
-    (counts.get(BiomeId.HIGHLAND) ?? 0);
+    (terrainCounts.get(TerrainId.MOUNTAIN) ?? 0) +
+    (terrainCounts.get(TerrainId.HIGH_PEAK) ?? 0) +
+    (terrainCounts.get(TerrainId.HILLS) ?? 0) +
+    (terrainCounts.get(TerrainId.HIGHLAND) ?? 0);
   const forests =
     (counts.get(BiomeId.DECIDUOUS_FOREST) ?? 0) +
     (counts.get(BiomeId.TAIGA) ?? 0) +
@@ -500,17 +554,21 @@ export function generateWorld(
 ): HexMapData {
   const elevation = generateElevationField(width, height, config);
   const { temperature, moisture } = simulateClimate(elevation, width, height, config);
+  const terrains = classifyTerrainsFromElevation(elevation, width, height, moisture);
   const initialBiomes = classifyBiomesFromClimate(
     elevation,
     temperature,
     moisture,
     width,
-    height
+    height,
+    undefined,
+    terrains
   );
 
   const hydro = generateRiversAuto({
     width,
     height,
+    terrains,
     biomes: initialBiomes,
     elevation,
     moisture,
@@ -523,7 +581,8 @@ export function generateWorld(
     moisture,
     width,
     height,
-    hydro.riverMoistureBonus
+    hydro.riverMoistureBonus,
+    terrains
   );
 
   const rawFeatures = generateSpecialFeatures(
@@ -534,7 +593,8 @@ export function generateWorld(
     temperature,
     moisture,
     hydro.rivers,
-    config.seed
+    config.seed,
+    terrains
   );
 
   const cliffRes = generateNaturalCliffs(
@@ -544,12 +604,15 @@ export function generateWorld(
     elevation,
     rawFeatures,
     hydro.rivers,
-    config.seed
+    config.seed,
+    undefined,
+    terrains
   );
 
   const waterSync = syncShallowWater({
     width,
     height,
+    terrains,
     biomes,
     elevation: cliffRes.elevation,
     features: cliffRes.features,
@@ -566,6 +629,7 @@ export function generateWorld(
     height,
     hexSizeKm,
     geography: { ...config },
+    terrains: waterSync.terrains,
     biomes: waterSync.biomes,
     elevation: waterSync.elevation,
     temperature,
@@ -599,12 +663,13 @@ export function generateWorld(
   for (let r = marginY; r < height - marginY; r += 2) {
     for (let q = marginX; q < width - marginX; q += 2) {
       const idx = hexIndex(q, r, width);
+      const t = map.terrains[idx];
       const b = map.biomes[idx];
       if (
-        b === BiomeId.DEEP_OCEAN ||
-        b === BiomeId.SHALLOW_WATER ||
-        b === BiomeId.MOUNTAIN ||
-        b === BiomeId.SNOW_PEAK ||
+        t === TerrainId.DEEP_OCEAN ||
+        t === TerrainId.SHALLOW_WATER ||
+        t === TerrainId.MOUNTAIN ||
+        t === TerrainId.HIGH_PEAK ||
         b === BiomeId.SNOW_ICE
       ) {
         continue;
@@ -691,27 +756,30 @@ export function generateWorld(
 
 /**
  * Recompute real climate (temperature, rainfall, rain shadows) and update land biomes
- * while preserving the user's current sea/land/mountain/custom-biome silhouette.
+ * while preserving the user's current terrain landforms, sea/land silhouette, and custom biomes.
  */
 export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
   const { width, height, biomes, geography } = map;
   const total = width * height;
+  const baseTerrains = new Array<number>(total);
   const elev = new Array<number>(total);
 
   for (let i = 0; i < total; i++) {
+    const t = getHexTerrain(map, i);
+    baseTerrains[i] = t;
     const b = biomes[i];
-    if (b === BiomeId.DEEP_OCEAN) elev[i] = -0.6;
-    else if (b === BiomeId.SHALLOW_WATER) elev[i] = -0.15;
-    else if (b === BiomeId.SNOW_PEAK) elev[i] = 0.85;
-    else if (b === BiomeId.MOUNTAIN) elev[i] = 0.64;
-    else if (b === BiomeId.HILLS || b === BiomeId.HIGHLAND) elev[i] = 0.42;
-    else if (b === BiomeId.SWAMP) elev[i] = 0.04;
-    else elev[i] = Math.max(0.1, Math.min(0.32, map.elevation[i] ?? 0.14));
+    if (t === TerrainId.PLAINS && b !== BiomeId.SWAMP) {
+      elev[i] = Math.max(0.1, Math.min(0.32, map.elevation[i] ?? 0.14));
+    } else if (t === TerrainId.PLAINS && b === BiomeId.SWAMP) {
+      elev[i] = 0.04;
+    } else {
+      elev[i] = getTerrainMeta(t).defaultElevation;
+    }
   }
 
   const { temperature, moisture } = simulateClimate(elev, width, height, geography);
   const hydro = generateRiversAuto(
-    { width, height, biomes, elevation: elev, moisture, geography },
+    { width, height, terrains: baseTerrains, biomes, elevation: elev, moisture, geography },
     { useCurrentBiomes: false }
   );
 
@@ -721,19 +789,14 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
     moisture,
     width,
     height,
-    hydro.riverMoistureBonus
+    hydro.riverMoistureBonus,
+    baseTerrains
   );
 
-  // Preserve mountains, peaks, water, and any custom biomes (>=100)
+  // Preserve water and custom biomes (>=100), while updating climate biomes across all land terrains
   for (let i = 0; i < total; i++) {
     const b = biomes[i];
-    if (
-      b >= 100 ||
-      b === BiomeId.MOUNTAIN ||
-      b === BiomeId.SNOW_PEAK ||
-      b === BiomeId.DEEP_OCEAN ||
-      b === BiomeId.SHALLOW_WATER
-    ) {
+    if (b >= 100 || b === BiomeId.DEEP_OCEAN || b === BiomeId.SHALLOW_WATER) {
       nextBiomes[i] = b;
     }
   }
@@ -741,6 +804,7 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
   const waterSync = syncShallowWater({
     width,
     height,
+    terrains: baseTerrains,
     biomes: nextBiomes,
     elevation: elev,
     features: map.features,
@@ -750,6 +814,7 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
   return {
     ...map,
     updatedAt: new Date().toISOString(),
+    terrains: waterSync.terrains,
     elevation: waterSync.elevation,
     temperature,
     moisture,

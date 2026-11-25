@@ -1,6 +1,6 @@
-import { getBiomeMeta } from '../data/biomes';
+import { getTerrainMeta } from '../data/terrains';
 import { BiomeId, HexMapData, RiverPath, RiverPoint } from '../types/map';
-import { getNeighbors, hexIndex } from './hexMath';
+import { getHexTerrain, getNeighbors, hexIndex } from './hexMath';
 
 /** Binary MinHeap for Priority-Flood depression filling (O(N log N)). */
 class MinHeap {
@@ -65,7 +65,8 @@ class MinHeap {
 export function deriveElevationFromBiomes(
   biomes: number[],
   width: number,
-  height: number
+  height: number,
+  terrains?: number[]
 ): Float64Array {
   const total = width * height;
   const distFromOcean = new Int32Array(total).fill(-1);
@@ -111,7 +112,8 @@ export function deriveElevationFromBiomes(
 
   const elev = new Float64Array(total);
   for (let i = 0; i < total; i++) {
-    const meta = getBiomeMeta(biomes[i]);
+    const tId = getHexTerrain({ biomes, terrains, customBiomes: [] }, i);
+    const meta = getTerrainMeta(tId);
     if (meta.isWater) {
       elev[i] = meta.defaultElevation;
     } else {
@@ -189,7 +191,9 @@ export interface AutoHydrologyResult {
  * precipitation-weighted flow accumulation, and tributary tracing.
  */
 export function generateRiversAuto(
-  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'elevation' | 'moisture' | 'geography'>,
+  map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'elevation' | 'moisture' | 'geography'> & {
+    terrains?: number[];
+  },
   options?: { threshold?: number; useCurrentBiomes?: boolean }
 ): AutoHydrologyResult {
   const { width, height, biomes, moisture, geography } = map;
@@ -205,7 +209,7 @@ export function generateRiversAuto(
   }
 
   const baseElev = options?.useCurrentBiomes
-    ? deriveElevationFromBiomes(biomes, width, height)
+    ? deriveElevationFromBiomes(biomes, width, height, map.terrains)
     : Float64Array.from(map.elevation);
 
   const filled = priorityFloodFill(baseElev, width, height, isWater);
