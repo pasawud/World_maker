@@ -1,9 +1,10 @@
 import { getBiomeMetaWithCustom, LEGACY_TERRAIN_BIOME_IDS } from '../data/biomes';
-import { getFeatureMeta } from '../data/features';
-import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
+import { getFeatureMetaWithCustom } from '../data/features';
+import { getTerrainMetaWithCustom, isWaterTerrainWithCustom } from '../data/terrains';
 import {
   BiomeId,
   CustomBiome,
+  CustomTerrain,
   HexCoord,
   HexMapData,
   RoadType,
@@ -243,9 +244,15 @@ export function isWaterBiome(biomeId: number, customBiomes?: CustomBiome[]): boo
 }
 
 export function getHexTerrain(
-  map: { biomes: number[]; customBiomes?: CustomBiome[]; terrains?: number[] },
+  map: {
+    biomes: number[];
+    customBiomes?: CustomBiome[];
+    terrains?: number[];
+    customTerrains?: CustomTerrain[];
+    terrainOverrides?: Record<number, Partial<Omit<CustomTerrain, 'id'>>>;
+  },
   idx: number
-): TerrainId {
+): TerrainId | number {
   const b = map.biomes[idx];
   if (b === BiomeId.DEEP_OCEAN) return TerrainId.DEEP_OCEAN;
   if (b === BiomeId.SHALLOW_WATER) return TerrainId.SHALLOW_WATER;
@@ -261,21 +268,32 @@ export function getHexTerrain(
   if (b === BiomeId.HILLS) return TerrainId.HILLS;
 
   const t = map.terrains?.[idx];
-  if (t !== undefined && t >= TerrainId.PLAINS && t <= TerrainId.LAKE) {
-    return t as TerrainId;
+  if (t !== undefined && ((t >= TerrainId.PLAINS && t <= TerrainId.LAKE) || t >= 100)) {
+    return t;
   }
   return TerrainId.PLAINS;
 }
 
 export function getCombinedMoveCost(
-  terrainId: TerrainId,
+  terrainId: TerrainId | number,
   biomeId: number,
-  customBiomes?: CustomBiome[]
+  customBiomes?: CustomBiome[],
+  customTerrains?: CustomTerrain[],
+  terrainOverrides?: Record<number, Partial<Omit<CustomTerrain, 'id'>>>
 ): number {
   const biomeMeta = getBiomeMetaWithCustom(biomeId, customBiomes);
-  if (isWaterTerrain(terrainId) || biomeMeta.isWater) return Infinity;
+  if (
+    isWaterTerrainWithCustom(terrainId, customTerrains, terrainOverrides) ||
+    biomeMeta.isWater
+  ) {
+    return Infinity;
+  }
 
-  let terrainCost = getTerrainMeta(terrainId).moveCost;
+  let terrainCost = getTerrainMetaWithCustom(
+    terrainId,
+    customTerrains,
+    terrainOverrides
+  ).moveCost;
   if (terrainId === TerrainId.HIGH_PEAK) terrainCost = Math.max(terrainCost, 48);
   else if (terrainId === TerrainId.MOUNTAIN) terrainCost = Math.max(terrainCost, 18);
 
@@ -453,10 +471,18 @@ export function findHexPath(
   const landCostForCell = (curIdx: number, nbIdx: number): number => {
     const b = biomes[nbIdx];
     const terrain = getHexTerrain(map, nbIdx);
-    let base = getCombinedMoveCost(terrain, b, customBiomes);
+    let base = getCombinedMoveCost(
+      terrain,
+      b,
+      customBiomes,
+      map.customTerrains,
+      map.terrainOverrides
+    );
     if (!Number.isFinite(base)) return Infinity;
 
-    const feat = features?.[nbIdx] ? getFeatureMeta(features[nbIdx]) : null;
+    const feat = features?.[nbIdx]
+      ? getFeatureMetaWithCustom(features[nbIdx], map.customFeatures, map.featureOverrides)
+      : null;
     if (feat) base = Math.max(0.6, base + feat.moveCostDelta);
 
     const cliffEscarpmentPenalty =
@@ -475,14 +501,18 @@ export function findHexPath(
     const b = biomes[nbIdx];
     const terrain = getHexTerrain(map, nbIdx);
     const meta = getBiomeMetaWithCustom(b, customBiomes);
-    const isWater = meta.isWater || isWaterTerrain(terrain);
+    const isWater =
+      meta.isWater ||
+      isWaterTerrainWithCustom(terrain, map.customTerrains, map.terrainOverrides);
 
     if (mode === 'sea') {
       // Strictly water-only between ports/coastal endpoints!
       if (!isWater) {
         return isEndpoint ? 1.4 : Infinity;
       }
-      const feat = features?.[nbIdx] ? getFeatureMeta(features[nbIdx]) : null;
+      const feat = features?.[nbIdx]
+        ? getFeatureMetaWithCustom(features[nbIdx], map.customFeatures, map.featureOverrides)
+        : null;
       const featDelta = feat ? feat.moveCostDelta : 0;
       const baseWater =
         terrain === TerrainId.LAKE ? 0.72 : terrain === TerrainId.SHALLOW_WATER ? 0.75 : 0.9;

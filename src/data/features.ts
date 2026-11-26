@@ -1,4 +1,18 @@
-import { SpecialFeatureMeta } from '../types/map';
+import { FeatureVisualStyle, SpecialFeatureMeta } from '../types/map';
+
+export const FEATURE_VISUAL_STYLES: { id: FeatureVisualStyle; labelTh: string }[] = [
+  { id: 'default', labelTh: 'สัญลักษณ์มาตรฐาน (วงกลม/หมุด)' },
+  { id: 'volcano', labelTh: 'ภูเขาไฟ / ปล่องไฟ' },
+  { id: 'oasis', labelTh: 'โอเอซิส / แหล่งน้ำ' },
+  { id: 'ruins', labelTh: 'โบราณสถาน / ซากปรัก' },
+  { id: 'crystal', labelTh: 'ผลึกแร่ / อัญมณี' },
+  { id: 'reef', labelTh: 'ปะการัง / ชายฝั่ง' },
+  { id: 'whirlpool', labelTh: 'กระแสน้ำวน' },
+  { id: 'geothermal', labelTh: 'น้ำพุร้อน / กีย์เซอร์' },
+  { id: 'mesa', labelTh: 'ผาหิน / ภูเขายอดตัด' },
+  { id: 'waterfall', labelTh: 'น้ำตก / หุบผาน้ำ' },
+  { id: 'custom', labelTh: 'ไอคอน/อักษรกำหนดเอง' },
+];
 
 export const SPECIAL_FEATURES: SpecialFeatureMeta[] = [
   {
@@ -170,4 +184,31 @@ export const FEATURE_BY_ID: Record<string, SpecialFeatureMeta> = Object.fromEntr
 export function getFeatureMeta(id: string): SpecialFeatureMeta | null {
   if (!id) return null;
   return FEATURE_BY_ID[id] ?? null;
+}
+
+export function getFeatureMetaWithCustom(
+  id: string,
+  customFeatures?: SpecialFeatureMeta[],
+  featureOverrides?: Record<string, Partial<Omit<SpecialFeatureMeta, 'id'>>>
+): (SpecialFeatureMeta & { isOverridden?: boolean }) | null {
+  if (!id) return null;
+  const base = FEATURE_BY_ID[id];
+  if (base) {
+    const ov = featureOverrides?.[id];
+    if (!ov) return base;
+    return { ...base, ...ov, isOverridden: true };
+  }
+  const found = customFeatures?.find((f) => f.id === id);
+  return found ? { ...found, isCustom: true } : null;
+}
+
+export function getAllFeatures(
+  customFeatures?: SpecialFeatureMeta[],
+  featureOverrides?: Record<string, Partial<Omit<SpecialFeatureMeta, 'id'>>>
+): (SpecialFeatureMeta & { isOverridden?: boolean })[] {
+  const builtIns = SPECIAL_FEATURES.map(
+    (f) => getFeatureMetaWithCustom(f.id, customFeatures, featureOverrides) ?? f
+  );
+  const customs = (customFeatures ?? []).map((f) => ({ ...f, isCustom: true }));
+  return [...builtIns, ...customs];
 }

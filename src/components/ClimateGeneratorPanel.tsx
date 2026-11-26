@@ -341,6 +341,56 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
           />
           <span>จำลองกระแสน้ำอุ่น/เย็น (ส่งผลต่ออุณหภูมิและฝนชายฝั่ง)</span>
         </label>
+        {draft.oceanCurrents !== false && (
+          <div className="bg-[#0f1620] border border-slate-800 rounded-md p-2 space-y-1.5 text-[11px]">
+            <div>
+              <div className="flex justify-between text-slate-300">
+                <span>ความแรงกระแสน้ำมหาสมุทร</span>
+                <span className="text-sky-300 font-medium">
+                  {(draft.currentStrength ?? 1).toFixed(1)}x
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.2}
+                max={2.0}
+                step={0.1}
+                value={draft.currentStrength ?? 1.0}
+                onChange={(e) =>
+                  setDraft({ ...draft, currentStrength: Number(e.target.value) })
+                }
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-slate-400">ทิศทางหมุน Coriolis</span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, coriolisDirection: 'normal' })}
+                  className={`px-2 py-0.5 rounded border text-[10px] cursor-pointer ${
+                    (draft.coriolisDirection ?? 'normal') === 'normal'
+                      ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                      : 'bg-[#151d28] border-slate-800 text-slate-400'
+                  }`}
+                >
+                  ปกติ (โลกจริง)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, coriolisDirection: 'reversed' })}
+                  className={`px-2 py-0.5 rounded border text-[10px] cursor-pointer ${
+                    draft.coriolisDirection === 'reversed'
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                      : 'bg-[#151d28] border-slate-800 text-slate-400'
+                  }`}
+                >
+                  หมุนกลับทิศ
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-2 text-[11px] text-slate-300">

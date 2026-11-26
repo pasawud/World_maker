@@ -1,5 +1,5 @@
 import { getBiomeMetaWithCustom } from '../data/biomes';
-import { getFeatureMeta } from '../data/features';
+import { getFeatureMetaWithCustom } from '../data/features';
 import { BiomeId, CityTier, HexMapData, TerrainId } from '../types/map';
 import { getHexTerrain, getNeighbors, hexIndex, isWaterBiome } from './hexMath';
 
@@ -28,7 +28,11 @@ export function generateTerritoriesFromCities(
   map: Pick<
     HexMapData,
     'width' | 'height' | 'biomes' | 'customBiomes' | 'features' | 'cities' | 'roads'
-  > & { terrains?: number[] }
+  > & {
+    terrains?: number[];
+    customFeatures?: HexMapData['customFeatures'];
+    featureOverrides?: HexMapData['featureOverrides'];
+  }
 ): string[] {
   const { width, height, biomes, customBiomes, features, cities, roads } = map;
   const total = width * height;
@@ -121,9 +125,16 @@ export function generateTerritoriesFromCities(
       else if (b === BiomeId.DESERT || b === BiomeId.SWAMP) step = 1.8;
       else step = Math.min(2.2, meta.moveCost);
 
-      const feat = features?.[nbIdx] ? getFeatureMeta(features[nbIdx]) : null;
+      const feat = features?.[nbIdx]
+        ? getFeatureMetaWithCustom(
+            features[nbIdx],
+            map.customFeatures,
+            map.featureOverrides
+          )
+        : null;
       if (feat?.id === 'cliff') step += 4.2;
       else if (feat?.id === 'canyon') step += 2.8;
+      else if (feat && feat.moveCostDelta > 1) step += feat.moveCostDelta * 0.4;
       if (roadDiscount[nbIdx]) step *= 0.72;
 
       const nextCost = cost + step;

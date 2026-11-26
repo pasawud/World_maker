@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { getFeatureMeta } from '../../data/features';
+import {
+  getAllFeatures,
+  getFeatureMeta,
+  getFeatureMetaWithCustom,
+} from '../../data/features';
+import { getAllTerrains, getTerrainMetaWithCustom } from '../../data/terrains';
 import { BiomeId, City, TerrainId } from '../../types/map';
+import {
+  elevationToMeters,
+  formatElevationMeters,
+  sculptElevationBrush,
+} from '../elevation';
 import {
   autoDetectCliffsFromElevation,
   getCliffEdges,
@@ -13,6 +23,7 @@ import {
   cubeToOffset,
   findHexPath,
   getCombinedMoveCost,
+  getHexTerrain,
   getNeighbors,
   hexDistance,
   hexIndex,
@@ -1258,5 +1269,199 @@ describe('Ocean Currents & Freshwater Lake System', () => {
     delete legacy.terrains;
     const migrated = parseMapFromJson(JSON.stringify(legacy));
     expect(migrated.terrains[hexIndex(7, 7, w)]).toBe(TerrainId.LAKE);
+  });
+});
+
+describe('Deep Customization, Adjustable Ocean Currents & Continuous Elevation', () => {
+  it('supports custom terrains, custom features, built-in overrides, pathfinding costs, and JSON round-trip', () => {
+    const w = 14;
+    const h = 10;
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.15);
+    map.features = new Array<string>(w * h).fill('');
+    map.roads = [];
+
+    map.customTerrains = [
+      {
+        id: 100,
+        nameTh: 'แคนยอนมรกต',
+        color: '#4d7c0f',
+        isWater: false,
+        defaultElevation: 0.42,
+        minElevation: 0.25,
+        maxElevation: 0.55,
+        moveCost: 9.5,
+        reliefStyle: 'canyon',
+      },
+    ];
+    map.terrainOverrides = {
+      [TerrainId.PLAINS]: { nameTh: 'ทุ่งหญ้าหลวง', moveCost: 0.8 },
+    };
+    map.customFeatures = [
+      {
+        id: 'feat_portal',
+        nameTh: 'ประตูมิติ',
+        color: '#a855f7',
+        placement: 'any',
+        moveCostDelta: -0.4,
+        goodsBonus: ['gems'],
+        visualStyle: 'custom',
+        symbol: '🌀',
+      },
+    ];
+    map.featureOverrides = {
+      oasis: { nameTh: 'บ่อน้ำศักดิ์สิทธิ์', moveCostDelta: -0.3 },
+    };
+
+    const allT = getAllTerrains(map.customTerrains, map.terrainOverrides);
+    expect(allT.some((t) => t.id === 100 && t.nameTh === 'แคนยอนมรกต')).toBe(true);
+    expect(getTerrainMetaWithCustom(TerrainId.PLAINS, map.customTerrains, map.terrainOverrides).nameTh).toBe(
+      'ทุ่งหญ้าหลวง'
+    );
+
+    const allF = getAllFeatures(map.customFeatures, map.featureOverrides);
+    expect(allF.some((f) => f.id === 'feat_portal')).toBe(true);
+    expect(getFeatureMetaWithCustom('oasis', map.customFeatures, map.featureOverrides)?.nameTh).toBe(
+      'บ่อน้ำศักดิ์สิทธิ์'
+    );
+
+    const midIdx = hexIndex(5, 5, w);
+    map.terrains[midIdx] = 100;
+    map.features[hexIndex(6, 5, w)] = 'feat_portal';
+    expect(getHexTerrain(map, midIdx)).toBe(100);
+
+    const path = findHexPath(map, { q: 4, r: 5 }, { q: 7, r: 5 }, 'land');
+    expect(path.reachable).toBe(true);
+    expect(path.weightedCost).toBeGreaterThan(2);
+
+    const json = serializeMapToJson(map);
+    const restored = parseMapFromJson(json);
+    expect(restored.customTerrains).toHaveLength(1);
+    expect(restored.customFeatures).toHaveLength(1);
+    expect(restored.terrainOverrides?.[TerrainId.PLAINS]?.nameTh).toBe('ทุ่งหญ้าหลวง');
+    expect(restored.featureOverrides?.oasis?.nameTh).toBe('บ่อน้ำศักดิ์สิทธิ์');
+    expect(restored.terrains[midIdx]).toBe(100);
+  });
+
+  it('supports adjustable currentStrength, coriolisDirection polarity flip, and manual currents', () => {
+    const w = 36;
+    const h = 22;
+    const elev = new Array<number>(w * h).fill(-0.5);
+    const terrains = new Array<number>(w * h).fill(TerrainId.DEEP_OCEAN);
+    for (let r = 4; r <= 16; r++) {
+      for (let q = 11; q <= 23; q++) {
+        const idx = hexIndex(q, r, w);
+        elev[idx] = 0.14;
+        terrains[idx] = TerrainId.PLAINS;
+      }
+    }
+
+    const baseCfg = {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      latNorth: 50,
+      latSouth: 15,
+      windMode: 'latitude' as const,
+      oceanCurrents: true,
+      currentStrength: 1.0,
+      coriolisDirection: 'normal' as const,
+    };
+
+    const normalField = computeOceanCurrents(w, h, elev, baseCfg, terrains);
+    const reversedField = computeOceanCurrents(
+      w,
+      h,
+      elev,
+      { ...baseCfg, coriolisDirection: 'reversed' },
+      terrains
+    );
+    const strongField = computeOceanCurrents(
+      w,
+      h,
+      elev,
+      { ...baseCfg, currentStrength: 1.8 },
+      terrains
+    );
+
+    const eastSeaIdx = hexIndex(25, 10, w);
+    const westSeaIdx = hexIndex(9, 10, w);
+    // Reversing Coriolis reverses the western/eastern boundary thermal contrast
+    expect(normalField.thermal[eastSeaIdx]).toBeGreaterThan(normalField.thermal[westSeaIdx]);
+    expect(reversedField.thermal[westSeaIdx]).toBeGreaterThan(reversedField.thermal[eastSeaIdx]);
+    expect(strongField.speed[eastSeaIdx]).toBeGreaterThanOrEqual(normalField.speed[eastSeaIdx]);
+
+    // Manual warm current warms an otherwise cold sea cell and its nearby coast
+    const manualWarm = [
+      {
+        id: 'cur_test',
+        kind: 'warm' as const,
+        strength: 1.8,
+        points: [
+          { q: 10, r: 9 },
+          { q: 10, r: 11 },
+        ],
+      },
+    ];
+    const withManualField = computeOceanCurrents(w, h, elev, baseCfg, terrains, manualWarm);
+    expect(withManualField.thermal[hexIndex(10, 10, w)]).toBeGreaterThan(
+      normalField.thermal[hexIndex(10, 10, w)]
+    );
+
+    const baseClimate = simulateClimate(elev, w, h, baseCfg, terrains);
+    const manualClimate = simulateClimate(elev, w, h, baseCfg, terrains, manualWarm);
+    expect(manualClimate.temperature[hexIndex(11, 10, w)]).toBeGreaterThan(
+      baseClimate.temperature[hexIndex(11, 10, w)]
+    );
+  });
+
+  it('computes monotonic meter elevation, smooth sculpting transitions, and preserves continuous bands', () => {
+    expect(elevationToMeters(-1.0)).toBe(-6000);
+    expect(elevationToMeters(0)).toBe(0);
+    expect(elevationToMeters(1.0)).toBe(8850);
+    expect(formatElevationMeters(1.0)).toBe('+8,850 ม.');
+    expect(formatElevationMeters(-1.0)).toBe('-6,000 ม.');
+
+    let prevM = -Infinity;
+    for (let e = -1.0; e <= 1.0001; e += 0.1) {
+      const m = elevationToMeters(e);
+      expect(m).toBeGreaterThan(prevM);
+      prevM = m;
+    }
+
+    const w = 15;
+    const h = 15;
+    const elev = new Array<number>(w * h).fill(0.14);
+    const terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+
+    // Raise repeatedly at center -> radial falloff & smooth landform tier transition
+    let curE = elev;
+    let curT = terrains;
+    for (let step = 0; step < 6; step++) {
+      const res = sculptElevationBrush(curE, curT, w, h, 7, 7, 2, 'raise', 0.1);
+      curE = res.nextElevation;
+      curT = res.nextTerrains;
+    }
+    const centerIdx = hexIndex(7, 7, w);
+    const edgeIdx = hexIndex(9, 7, w);
+    expect(curE[centerIdx]).toBeGreaterThan(curE[edgeIdx]);
+    expect(curE[centerIdx]).toBeGreaterThan(0.55);
+    expect(curT[centerIdx]).toBeGreaterThanOrEqual(TerrainId.HIGHLAND);
+
+    // Verify recomputeBiomesFromCurrentMap keeps distinct sculpted elevations inside mountain bands
+    const map = generateWorld(w, h, 20, DEFAULT_GEOGRAPHY_CONFIG);
+    map.terrains = new Array<number>(w * h).fill(TerrainId.PLAINS);
+    map.biomes = new Array<number>(w * h).fill(BiomeId.GRASSLAND);
+    map.elevation = new Array<number>(w * h).fill(0.14);
+    const idxA = hexIndex(5, 5, w);
+    const idxB = hexIndex(6, 5, w);
+    map.terrains[idxA] = TerrainId.MOUNTAIN;
+    map.elevation[idxA] = 0.60;
+    map.terrains[idxB] = TerrainId.MOUNTAIN;
+    map.elevation[idxB] = 0.76;
+
+    const recomputed = recomputeBiomesFromCurrentMap(map);
+    expect(recomputed.elevation[idxA]).toBeCloseTo(0.60, 2);
+    expect(recomputed.elevation[idxB]).toBeCloseTo(0.76, 2);
   });
 });

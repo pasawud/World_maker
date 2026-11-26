@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   Droplets,
   Eraser,
   Maximize2,
@@ -12,16 +14,18 @@ import {
   Route,
   Sparkles,
   Waves,
+  Wind,
 } from 'lucide-react';
 import { getBiomeMetaWithCustom } from '../data/biomes';
-import { getFeatureMeta } from '../data/features';
+import { getFeatureMetaWithCustom } from '../data/features';
 import { getAllGovernmentTypes, getAllPoiTypes } from '../data/goods';
-import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
+import { getTerrainMetaWithCustom, isWaterTerrainWithCustom } from '../data/terrains';
 import {
   computeOceanCurrents,
   getCurrentCompassLabel,
   getCurrentKind,
 } from '../engine/currents';
+import { formatElevationMeters, SculptMode } from '../engine/elevation';
 import {
   findHexPath,
   getHexTerrain,
@@ -55,8 +59,15 @@ import {
 interface MapCanvasProps {
   map: HexMapData;
   tool: ToolMode;
-  activeTerrain: TerrainId;
-  onSelectTerrain: (t: TerrainId) => void;
+  activeTerrain: number;
+  onSelectTerrain: (t: number) => void;
+  terrainEditMode: 'paint' | 'sculpt';
+  onChangeTerrainEditMode: (m: 'paint' | 'sculpt') => void;
+  sculptMode: SculptMode;
+  onChangeSculptMode: (m: SculptMode) => void;
+  sculptIntensity: number;
+  onChangeSculptIntensity: (n: number) => void;
+  onSculptElevationAt: (q: number, r: number) => void;
   activeBiome: number;
   onSelectBiome: (b: number) => void;
   activeFeature: string | null;
@@ -71,6 +82,14 @@ interface MapCanvasProps {
   onChangeTerrainSubTool: (t: 'brush' | 'fill' | 'eyedropper') => void;
   riverSubTool: 'draw' | 'erase';
   onChangeRiverSubTool: (t: 'draw' | 'erase') => void;
+  currentSubTool: 'draw' | 'erase';
+  onChangeCurrentSubTool: (t: 'draw' | 'erase') => void;
+  currentKind: 'warm' | 'cold' | 'neutral';
+  onChangeCurrentKind: (k: 'warm' | 'cold' | 'neutral') => void;
+  currentDrawStrength: number;
+  onChangeCurrentDrawStrength: (n: number) => void;
+  onAddManualCurrent: (points: HexCoord[]) => void;
+  onEraseCurrentNear: (q: number, r: number) => void;
   roadType: RoadType;
   onChangeRoadType: (t: RoadType) => void;
   roadSubTool: 'auto' | 'manual' | 'erase';
@@ -123,6 +142,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     tool,
     activeTerrain,
     onSelectTerrain,
+    terrainEditMode,
+    onChangeTerrainEditMode,
+    sculptMode,
+    onChangeSculptMode,
+    sculptIntensity,
+    onChangeSculptIntensity,
+    onSculptElevationAt,
     activeBiome,
     onSelectBiome,
     activeFeature,
@@ -137,6 +163,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onChangeTerrainSubTool,
     riverSubTool,
     onChangeRiverSubTool,
+    currentSubTool,
+    onChangeCurrentSubTool,
+    currentKind,
+    onChangeCurrentKind,
+    currentDrawStrength,
+    onChangeCurrentDrawStrength,
+    onAddManualCurrent,
+    onEraseCurrentNear,
     roadType,
     onChangeRoadType,
     roadSubTool,
@@ -353,9 +387,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         map.height,
         map.elevation,
         map.geography,
-        map.terrains
+        map.terrains,
+        map.manualCurrents
       ),
-    [map.elevation, map.geography, map.height, map.terrains, map.width]
+    [map.elevation, map.geography, map.height, map.manualCurrents, map.terrains, map.width]
   );
 
   // Minimap
@@ -377,14 +412,15 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       for (let q = 0; q < map.width; q++) {
         const idx = hexIndex(q, r, map.width);
         const tId = getHexTerrain(map, idx);
+        const tMeta = getTerrainMetaWithCustom(tId, map.customTerrains, map.terrainOverrides);
         const bMeta = getBiomeMetaWithCustom(map.biomes[idx], map.customBiomes);
         let color =
           climateOverlay === 'terrain'
-            ? getTerrainMeta(tId).color
+            ? tMeta.color
             : climateOverlay === 'currents'
             ? tId === TerrainId.LAKE
               ? '#3b8ec2'
-              : bMeta.isWater || isWaterTerrain(tId)
+              : bMeta.isWater || isWaterTerrainWithCustom(tId, map.customTerrains, map.terrainOverrides)
               ? oceanCurrentField.thermal[idx] >= 0.2
                 ? '#e06346'
                 : oceanCurrentField.thermal[idx] <= -0.2
@@ -392,7 +428,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                 : '#1b496e'
               : '#364152'
             : bMeta.isWater && !bMeta.isCustom
-            ? getTerrainMeta(tId).color
+            ? tMeta.color
             : bMeta.color;
         if (climateOverlay === 'none') {
           if (tId === TerrainId.MOUNTAIN) color = '#766b5d';
@@ -476,7 +512,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     if (!h) return;
 
     if (tool === 'terrain') {
-      if (terrainSubTool === 'eyedropper') {
+      if (terrainEditMode === 'sculpt' && activeFeature === null) {
+        isPaintingRef.current = true;
+        onBeginStroke();
+        onSculptElevationAt(h.q, h.r);
+      } else if (terrainSubTool === 'eyedropper') {
         const t = getHexTerrain(map, hexIndex(h.q, h.r, map.width));
         onClearActiveFeature();
         onSelectTerrain(t);
@@ -488,6 +528,20 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         onBeginStroke();
         const res = onPaintTerrainAt(h.q, h.r);
         if (res.warning) warnOnce(res.warning);
+      }
+    } else if (tool === 'current') {
+      if (currentSubTool === 'erase') {
+        onEraseCurrentNear(h.q, h.r);
+      } else {
+        const idx = hexIndex(h.q, h.r, map.width);
+        const tId = getHexTerrain(map, idx);
+        if (!isWaterTerrainWithCustom(tId, map.customTerrains, map.terrainOverrides)) {
+          warnOnce('วาดกระแสน้ำได้เฉพาะบนทะเลหรือมหาสมุทรเท่านั้น');
+          return;
+        }
+        isPaintingRef.current = true;
+        draftPathRef.current = [h];
+        setDraftPath([h]);
       }
     } else if (tool === 'biome') {
       if (terrainSubTool === 'eyedropper') {
@@ -621,9 +675,26 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     setHoverHex(h);
     if (!h || !isPaintingRef.current) return;
 
-    if (tool === 'terrain' && (terrainSubTool === 'brush' || activeFeature !== null)) {
-      const res = onPaintTerrainAt(h.q, h.r);
-      if (res.warning) warnOnce(res.warning);
+    if (tool === 'terrain') {
+      if (terrainEditMode === 'sculpt' && activeFeature === null) {
+        onSculptElevationAt(h.q, h.r);
+      } else if (terrainSubTool === 'brush' || activeFeature !== null) {
+        const res = onPaintTerrainAt(h.q, h.r);
+        if (res.warning) warnOnce(res.warning);
+      }
+    } else if (tool === 'current' && currentSubTool === 'draw') {
+      const cur = draftPathRef.current;
+      const last = cur[cur.length - 1];
+      if (!last || last.q !== h.q || last.r !== h.r) {
+        const idx = hexIndex(h.q, h.r, map.width);
+        const tId = getHexTerrain(map, idx);
+        if (!isWaterTerrainWithCustom(tId, map.customTerrains, map.terrainOverrides)) {
+          return;
+        }
+        const next = [...cur, h];
+        draftPathRef.current = next;
+        setDraftPath(next);
+      }
     } else if (tool === 'biome' && terrainSubTool === 'brush') {
       const res = onPaintBiomeAt(h.q, h.r);
       if (res.warning) warnOnce(res.warning);
@@ -687,6 +758,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         }
         draftPathRef.current = [];
         setDraftPath([]);
+      } else if (tool === 'current' && currentSubTool === 'draw') {
+        const pts = draftPathRef.current;
+        if (pts.length >= 2) {
+          onAddManualCurrent(pts);
+        }
+        draftPathRef.current = [];
+        setDraftPath([]);
       } else if (tool === 'road' && roadSubTool === 'manual') {
         const pts = draftPathRef.current;
         if (pts.length >= 2) {
@@ -716,9 +794,15 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const hoverInfo = useMemo(() => {
     if (!hoverHex) return null;
     const idx = hexIndex(hoverHex.q, hoverHex.r, map.width);
-    const terrain = getTerrainMeta(getHexTerrain(map, idx));
+    const terrain = getTerrainMetaWithCustom(
+      getHexTerrain(map, idx),
+      map.customTerrains,
+      map.terrainOverrides
+    );
     const biome = getBiomeMetaWithCustom(map.biomes[idx], map.customBiomes);
-    const feat = map.features?.[idx] ? getFeatureMeta(map.features[idx]) : null;
+    const feat = map.features?.[idx]
+      ? getFeatureMetaWithCustom(map.features[idx], map.customFeatures, map.featureOverrides)
+      : null;
     const kingdomId = map.territories?.[idx] ?? '';
     const kingdom = kingdomId ? map.kingdoms.find((k) => k.id === kingdomId) : null;
     const govLabel = kingdom
@@ -729,7 +813,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const religion = relId ? map.religionList.find((r) => r.id === relId) : null;
     const cultId = map.cultures?.[idx] ?? '';
     const culture = cultId ? (map.cultureList ?? []).find((c) => c.id === cultId) : null;
-    const elevM = Math.round((map.elevation[idx] ?? 0) * 5200);
+    const elevLabel = formatElevationMeters(map.elevation[idx] ?? 0);
     const temp = map.temperature[idx] ?? 15;
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
     const latStr = formatLatitude(getRowLatitude(hoverHex.r, map.height, map.geography));
@@ -751,7 +835,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       govLabel,
       religion,
       culture,
-      elevM,
+      elevLabel,
       temp,
       moist,
       latStr,
@@ -762,9 +846,15 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     };
   }, [hoverHex, map, oceanCurrentField]);
 
-  const activeTerrainMeta = getTerrainMeta(activeTerrain);
+  const activeTerrainMeta = getTerrainMetaWithCustom(
+    activeTerrain,
+    map.customTerrains,
+    map.terrainOverrides
+  );
   const activeBiomeMeta = getBiomeMetaWithCustom(activeBiome, map.customBiomes);
-  const activeFeatureMeta = activeFeature ? getFeatureMeta(activeFeature) : null;
+  const activeFeatureMeta = activeFeature
+    ? getFeatureMetaWithCustom(activeFeature, map.customFeatures, map.featureOverrides)
+    : null;
   const allPoiTypes = useMemo(() => getAllPoiTypes(map.customPoiTypes), [map.customPoiTypes]);
 
   return (
@@ -789,6 +879,32 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2 bg-[#111720]/92 backdrop-blur-sm border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs shadow-xl max-w-[calc(100%-70px)]">
           {tool === 'terrain' && (
             <>
+              {/* 2-mode switch: Paint Landform vs Continuous Elevation Sculpt */}
+              {activeFeature === null && (
+                <div className="flex items-center bg-[#0c1118] border border-slate-700/80 rounded p-0.5 gap-0.5">
+                  <button
+                    onClick={() => onChangeTerrainEditMode('paint')}
+                    className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
+                      terrainEditMode === 'paint'
+                        ? 'bg-amber-500/25 text-amber-200 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    ระบายภูมิประเทศ
+                  </button>
+                  <button
+                    onClick={() => onChangeTerrainEditMode('sculpt')}
+                    className={`px-2 py-0.5 rounded text-[11px] cursor-pointer ${
+                      terrainEditMode === 'sculpt'
+                        ? 'bg-emerald-500/25 text-emerald-200 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    ปั้นความสูง
+                  </button>
+                </div>
+              )}
+
               {activeFeature !== null ? (
                 <span className="flex items-center gap-1.5 text-amber-200 font-medium">
                   <span
@@ -799,87 +915,138 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                     ? 'โหมด: ลบลักษณะพิเศษ'
                     : `ลักษณะพิเศษ: ${activeFeatureMeta?.nameTh}`}
                 </span>
+              ) : terrainEditMode === 'sculpt' ? (
+                <>
+                  <div className="flex items-center gap-1">
+                    {[
+                      { id: 'raise' as const, label: 'ยกสูง', icon: <ArrowUp className="w-3 h-3" /> },
+                      { id: 'lower' as const, label: 'ขุดลึก', icon: <ArrowDown className="w-3 h-3" /> },
+                      { id: 'smooth' as const, label: 'เกลี่ยเรียบ', icon: <Waves className="w-3 h-3" /> },
+                      { id: 'flatten' as const, label: 'เสมอระดับ', icon: <Minus className="w-3 h-3" /> },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => onChangeSculptMode(m.id)}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+                          sculptMode === m.id
+                            ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200 font-medium'
+                            : 'bg-[#17202b] border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {m.icon}
+                        <span>{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="h-4 w-px bg-slate-700" />
+                  <span className="text-slate-400">ความแรง:</span>
+                  <div className="flex gap-1">
+                    {[
+                      { val: 0.04, label: 'เบา' },
+                      { val: 0.08, label: 'กลาง' },
+                      { val: 0.14, label: 'แรง' },
+                    ].map((s) => (
+                      <button
+                        key={s.val}
+                        onClick={() => onChangeSculptIntensity(s.val)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] border cursor-pointer ${
+                          Math.abs(sculptIntensity - s.val) < 0.01
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                            : 'border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
               ) : (
-                <span className="flex items-center gap-1.5 text-slate-200 font-medium">
-                  <span
-                    className="w-3.5 h-3.5 rounded-sm border border-white/25"
-                    style={{ backgroundColor: activeTerrainMeta.color }}
-                  />
-                  ภูมิประเทศ: {activeTerrainMeta.nameTh}
-                </span>
+                <>
+                  <span className="flex items-center gap-1.5 text-slate-200 font-medium">
+                    <span
+                      className="w-3.5 h-3.5 rounded-sm border border-white/25"
+                      style={{ backgroundColor: activeTerrainMeta.color }}
+                    />
+                    {activeTerrainMeta.nameTh}
+                  </span>
+                  <div className="h-4 w-px bg-slate-700" />
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => onChangeTerrainSubTool('brush')}
+                      className={`p-1 rounded cursor-pointer ${
+                        terrainSubTool === 'brush' ? 'bg-amber-500/25 text-amber-300' : 'text-slate-400'
+                      }`}
+                      title="พู่กัน"
+                    >
+                      <Paintbrush className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        onClearActiveFeature();
+                        onChangeTerrainSubTool('fill');
+                      }}
+                      className={`p-1 rounded cursor-pointer ${
+                        terrainSubTool === 'fill' && activeFeature === null
+                          ? 'bg-amber-500/25 text-amber-300'
+                          : 'text-slate-400'
+                      }`}
+                      title="เทสีพื้นที่ต่อเนื่อง"
+                    >
+                      <PaintBucket className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onChangeTerrainSubTool('eyedropper')}
+                      className={`p-1 rounded cursor-pointer ${
+                        terrainSubTool === 'eyedropper'
+                          ? 'bg-amber-500/25 text-amber-300'
+                          : 'text-slate-400'
+                      }`}
+                      title="ดูดสีภูมิประเทศ"
+                    >
+                      <Pipette className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </>
               )}
               <div className="h-4 w-px bg-slate-700" />
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => onChangeTerrainSubTool('brush')}
-                  className={`p-1 rounded cursor-pointer ${
-                    terrainSubTool === 'brush' ? 'bg-amber-500/25 text-amber-300' : 'text-slate-400'
-                  }`}
-                  title="พู่กัน"
-                >
-                  <Paintbrush className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => {
-                    onClearActiveFeature();
-                    onChangeTerrainSubTool('fill');
-                  }}
-                  className={`p-1 rounded cursor-pointer ${
-                    terrainSubTool === 'fill' && activeFeature === null
-                      ? 'bg-amber-500/25 text-amber-300'
-                      : 'text-slate-400'
-                  }`}
-                  title="เทสีพื้นที่ต่อเนื่อง"
-                >
-                  <PaintBucket className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => onChangeTerrainSubTool('eyedropper')}
-                  className={`p-1 rounded cursor-pointer ${
-                    terrainSubTool === 'eyedropper'
-                      ? 'bg-amber-500/25 text-amber-300'
-                      : 'text-slate-400'
-                  }`}
-                  title="ดูดสีภูมิประเทศ"
-                >
-                  <Pipette className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <div className="h-4 w-px bg-slate-700" />
-              <span className="text-slate-400">ขนาดพู่กัน: {brushSize}</span>
+              <span className="text-slate-400">พู่กัน: {brushSize}</span>
               <input
                 type="range"
                 min={1}
                 max={6}
                 value={brushSize}
                 onChange={(e) => onChangeBrushSize(Number(e.target.value))}
-                className="w-20"
+                className="w-16"
               />
-              <div className="h-4 w-px bg-slate-700" />
-              <button
-                onClick={onToggleLakeBrush}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
-                  activeFeature === null && activeTerrain === TerrainId.LAKE
-                    ? 'bg-sky-500/25 border-sky-400 text-sky-100 font-medium'
-                    : 'bg-[#17202b] border-slate-700 text-slate-300 hover:border-slate-500'
-                }`}
-                title="ระบายทะเลสาบน้ำจืด (แยกจากมหาสมุทรและคงอยู่เมื่อคำนวณสภาพอากาศใหม่)"
-              >
-                <Droplets className="w-3.5 h-3.5 text-sky-400" />
-                <span>ทะเลสาบ</span>
-              </button>
-              <button
-                onClick={onToggleCliffBrush}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
-                  activeFeature === 'cliff'
-                    ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-medium'
-                    : 'bg-[#17202b] border-slate-700 text-slate-300 hover:border-slate-500'
-                }`}
-                title="สลับพู่กันวาดหน้าผา (บริเวณหน้าผาจะไม่เกิดทะเลน้ำตื้น)"
-              >
-                <Mountain className="w-3.5 h-3.5" />
-                <span>หน้าผา</span>
-              </button>
+              {terrainEditMode === 'paint' && (
+                <>
+                  <div className="h-4 w-px bg-slate-700" />
+                  <button
+                    onClick={onToggleLakeBrush}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
+                      activeFeature === null && activeTerrain === TerrainId.LAKE
+                        ? 'bg-sky-500/25 border-sky-400 text-sky-100 font-medium'
+                        : 'bg-[#17202b] border-slate-700 text-slate-300 hover:border-slate-500'
+                    }`}
+                    title="ระบายทะเลสาบน้ำจืด"
+                  >
+                    <Droplets className="w-3.5 h-3.5 text-sky-400" />
+                    <span>ทะเลสาบ</span>
+                  </button>
+                  <button
+                    onClick={onToggleCliffBrush}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
+                      activeFeature === 'cliff'
+                        ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-medium'
+                        : 'bg-[#17202b] border-slate-700 text-slate-300 hover:border-slate-500'
+                    }`}
+                    title="สลับพู่กันวาดหน้าผา"
+                  >
+                    <Mountain className="w-3.5 h-3.5" />
+                    <span>หน้าผา</span>
+                  </button>
+                </>
+              )}
               <button
                 onClick={onToggleAutoShallowWater}
                 className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
@@ -892,6 +1059,62 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                 <Waves className="w-3.5 h-3.5" />
                 <span>น้ำตื้นอัตโนมัติ</span>
               </button>
+            </>
+          )}
+
+          {tool === 'current' && (
+            <>
+              <button
+                onClick={() => onChangeCurrentSubTool('draw')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  currentSubTool === 'draw' ? 'bg-amber-500/25 text-amber-200' : 'text-slate-400'
+                }`}
+              >
+                <Wind className="w-3.5 h-3.5" /> วาดกระแสน้ำ
+              </button>
+              <button
+                onClick={() => onChangeCurrentSubTool('erase')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  currentSubTool === 'erase' ? 'bg-rose-500/25 text-rose-200' : 'text-slate-400'
+                }`}
+              >
+                <Eraser className="w-3.5 h-3.5" /> ลบกระแสน้ำ
+              </button>
+              {currentSubTool === 'draw' && (
+                <>
+                  <div className="h-4 w-px bg-slate-700" />
+                  {[
+                    { id: 'warm' as const, label: 'น้ำอุ่น (+°C)', cls: 'bg-orange-500/25 border-orange-400 text-orange-200' },
+                    { id: 'cold' as const, label: 'น้ำเย็น (-°C)', cls: 'bg-sky-500/25 border-sky-400 text-sky-200' },
+                    { id: 'neutral' as const, label: 'กระแสกลาง', cls: 'bg-teal-500/25 border-teal-400 text-teal-200' },
+                  ].map((k) => (
+                    <button
+                      key={k.id}
+                      onClick={() => onChangeCurrentKind(k.id)}
+                      className={`px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+                        currentKind === k.id
+                          ? k.cls
+                          : 'bg-[#17202b] border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                  <span className="text-slate-400">แรง: {currentDrawStrength.toFixed(1)}x</span>
+                  <input
+                    type="range"
+                    min={0.4}
+                    max={2.0}
+                    step={0.1}
+                    value={currentDrawStrength}
+                    onChange={(e) => onChangeCurrentDrawStrength(Number(e.target.value))}
+                    className="w-16"
+                  />
+                </>
+              )}
+              <span className="text-slate-400 hidden sm:inline">
+                ลากบนทะเลเพื่อกำหนดทิศไหล
+              </span>
             </>
           )}
 
@@ -1148,15 +1371,35 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         </button>
       </div>
 
-      {/* Bottom-Left Scale Bar */}
-      <div className="absolute bottom-3 left-3 bg-[#111720]/88 border border-slate-700/70 rounded px-2.5 py-1.5 pointer-events-none">
-        <div className="text-[11px] font-medium text-slate-200 mb-1">
-          {scaleBar.km.toLocaleString()} กม.
+      {/* Bottom-Left Scale Bar + Elevation Ramp Legend */}
+      <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 pointer-events-none">
+        {climateOverlay === 'elevation' && (
+          <div className="bg-[#111720]/90 border border-slate-700/70 rounded px-2.5 py-1.5 text-[10px] text-slate-200 shadow-lg">
+            <div className="font-semibold text-amber-300 mb-1">สเกลความสูง/ความลึก (เมตร)</div>
+            <div
+              className="h-2.5 w-44 rounded-xs border border-slate-700"
+              style={{
+                background:
+                  'linear-gradient(to right, #081830 0%, #205886 35%, #52a6c6 48%, #3e844a 52%, #b6be62 66%, #ba904e 76%, #9a663e 86%, #f6faff 100%)',
+              }}
+            />
+            <div className="flex justify-between text-[9px] text-slate-400 mt-0.5 tabular-nums">
+              <span>-6,000</span>
+              <span>0 ม.</span>
+              <span>+2,800</span>
+              <span>+8,850</span>
+            </div>
+          </div>
+        )}
+        <div className="bg-[#111720]/88 border border-slate-700/70 rounded px-2.5 py-1.5 w-fit">
+          <div className="text-[11px] font-medium text-slate-200 mb-1">
+            {scaleBar.km.toLocaleString()} กม.
+          </div>
+          <div
+            className="h-1.5 border-x-2 border-b-2 border-slate-200"
+            style={{ width: `${scaleBar.px}px` }}
+          />
         </div>
-        <div
-          className="h-1.5 border-x-2 border-b-2 border-slate-200"
-          style={{ width: `${scaleBar.px}px` }}
-        />
       </div>
 
       {/* Bottom-Center Telemetry */}
@@ -1172,7 +1415,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
             />
             {hoverInfo.terrain.nameTh}
           </span>
-          {(!isWaterTerrain(hoverInfo.terrain.id) || hoverInfo.biome.isCustom) && (
+          {(!isWaterTerrainWithCustom(hoverInfo.terrain.id, map.customTerrains, map.terrainOverrides) || hoverInfo.biome.isCustom) && (
             <span className="flex items-center gap-1 font-medium text-emerald-300">
               <span className="text-slate-500">·</span>
               <span
@@ -1208,10 +1451,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           )}
           <span className="text-slate-300">
             {hoverInfo.terrain.id === TerrainId.LAKE
-              ? 'ทะเลสาบ'
-              : hoverInfo.elevM >= 0
-              ? `${hoverInfo.elevM.toLocaleString()} ม.`
-              : 'ทะเล'}
+              ? `ทะเลสาบ (${hoverInfo.elevLabel})`
+              : hoverInfo.elevLabel}
           </span>
           {hoverInfo.curKind !== 'none' && (
             <span

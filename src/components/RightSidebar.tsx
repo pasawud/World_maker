@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Camera,
+  ChevronDown,
+  ChevronRight,
   Crown,
   Download,
   Eraser,
@@ -15,9 +17,10 @@ import {
   Trash2,
   Upload,
   Waves,
+  Wind,
 } from 'lucide-react';
 import { getPaintableBiomes } from '../data/biomes';
-import { SPECIAL_FEATURES } from '../data/features';
+import { getAllFeatures } from '../data/features';
 import {
   getAllCultureTypes,
   getAllGovernmentTypes,
@@ -25,7 +28,8 @@ import {
   getAllReligionTypes,
   TRAVEL_SPEEDS,
 } from '../data/goods';
-import { TERRAINS } from '../data/terrains';
+import { getAllTerrains } from '../data/terrains';
+import { formatElevationMeters } from '../engine/elevation';
 import {
   computeRealDimensions,
   findHexPath,
@@ -50,7 +54,6 @@ import {
   Kingdom,
   Religion,
   ReligionType,
-  TerrainId,
   ToolMode,
   TradeMode,
   TravelSpeedId,
@@ -61,8 +64,16 @@ import { ClimateGeneratorPanel } from './ClimateGeneratorPanel';
 interface RightSidebarProps {
   map: HexMapData;
   tool: ToolMode;
-  activeTerrain: TerrainId;
-  onSelectTerrain: (t: TerrainId) => void;
+  activeTerrain: number;
+  onSelectTerrain: (t: number) => void;
+  terrainEditMode: 'paint' | 'sculpt';
+  onChangeTerrainEditMode: (m: 'paint' | 'sculpt') => void;
+  currentKind: 'warm' | 'cold' | 'neutral';
+  onChangeCurrentKind: (k: 'warm' | 'cold' | 'neutral') => void;
+  currentDrawStrength: number;
+  onChangeCurrentDrawStrength: (n: number) => void;
+  onUpdateGeography: (patch: Partial<GeographyConfig>) => void;
+  onDeleteManualCurrent: (id: string) => void;
   activeBiome: number;
   onSelectBiome: (b: number) => void;
   activeFeature: string | null;
@@ -113,7 +124,7 @@ interface RightSidebarProps {
   onChangeTradeMode: (m: TradeMode) => void;
   tradeStartCityId: string | null;
   onCancelTradeStart: () => void;
-  onOpenCustomModal: (tab: 'biomes' | 'pois') => void;
+  onOpenCustomModal: (tab: 'terrains' | 'biomes' | 'features' | 'pois') => void;
   onOpenExportModal: () => void;
   onQuickPngExport: () => void;
   onClearMap: () => void;
@@ -125,6 +136,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     tool,
     activeTerrain,
     onSelectTerrain,
+    terrainEditMode,
+    onChangeTerrainEditMode,
+    currentKind,
+    onChangeCurrentKind,
+    currentDrawStrength,
+    onChangeCurrentDrawStrength,
+    onUpdateGeography,
+    onDeleteManualCurrent,
     activeBiome,
     onSelectBiome,
     activeFeature,
@@ -181,7 +200,38 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onClearMap,
   } = props;
 
+  const allTerrains = useMemo(
+    () => getAllTerrains(map.customTerrains, map.terrainOverrides),
+    [map.customTerrains, map.terrainOverrides]
+  );
+  const allFeatures = useMemo(
+    () => getAllFeatures(map.customFeatures, map.featureOverrides),
+    [map.customFeatures, map.featureOverrides]
+  );
   const paintableBiomes = useMemo(() => getPaintableBiomes(map.customBiomes), [map.customBiomes]);
+
+  const [openSections, setOpenSections] = useState<
+    Record<'features' | 'terrains' | 'biomes' | 'pois' | 'summary', boolean>
+  >({
+    features: false,
+    terrains: true,
+    biomes: false,
+    pois: false,
+    summary: true,
+  });
+
+  useEffect(() => {
+    setOpenSections((prev) => {
+      if (tool === 'terrain') return { ...prev, terrains: true, features: true };
+      if (tool === 'biome') return { ...prev, biomes: true };
+      if (tool === 'poi') return { ...prev, pois: true };
+      return prev;
+    });
+  }, [tool]);
+
+  const toggleSection = (k: keyof typeof openSections) => {
+    setOpenSections((prev) => ({ ...prev, [k]: !prev[k] }));
+  };
   const allPoiTypes = useMemo(() => getAllPoiTypes(map.customPoiTypes), [map.customPoiTypes]);
   const govTypes = useMemo(
     () => getAllGovernmentTypes(map.customGovernmentTypes),
@@ -284,6 +334,149 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           onDelete={() => onDeleteCity(selectedCity.id)}
           onClose={onCloseCity}
         />
+      )}
+
+      {tool === 'current' && (
+        <div className="bg-[#151d28] border border-sky-500/40 rounded-lg p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-sky-300 flex items-center gap-1.5">
+              <Wind className="w-4 h-4" />
+              ระบบกระแสน้ำมหาสมุทร
+            </h3>
+            <button
+              onClick={() => onChangeOverlay(climateOverlay === 'currents' ? 'none' : 'currents')}
+              className={`px-2 py-0.5 rounded text-[10px] border cursor-pointer ${
+                climateOverlay === 'currents'
+                  ? 'bg-sky-500/25 border-sky-400 text-sky-200'
+                  : 'border-slate-700 text-slate-300'
+              }`}
+            >
+              {climateOverlay === 'currents' ? 'กำลังดูโหมดกระแสน้ำ' : 'เปิดโหมดกระแสน้ำ'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1 text-[11px]">
+            {[
+              { id: 'warm' as const, label: 'น้ำอุ่น' },
+              { id: 'cold' as const, label: 'น้ำเย็น' },
+              { id: 'neutral' as const, label: 'กระแสกลาง' },
+            ].map((k) => (
+              <button
+                key={k.id}
+                onClick={() => onChangeCurrentKind(k.id)}
+                className={`py-1 rounded border cursor-pointer ${
+                  currentKind === k.id
+                    ? k.id === 'warm'
+                      ? 'bg-orange-500/25 border-orange-400 text-orange-200'
+                      : k.id === 'cold'
+                      ? 'bg-sky-500/25 border-sky-400 text-sky-200'
+                      : 'bg-teal-500/25 border-teal-400 text-teal-200'
+                    : 'bg-[#0f1620] border-slate-800 text-slate-400'
+                }`}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-1.5 text-[11px] bg-[#0f1620] border border-slate-800 rounded p-2">
+            <div>
+              <div className="flex justify-between text-slate-300">
+                <span>กำลังวาดกระแสน้ำ</span>
+                <span className="text-amber-300">{currentDrawStrength.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min={0.4}
+                max={2.0}
+                step={0.1}
+                value={currentDrawStrength}
+                onChange={(e) => onChangeCurrentDrawStrength(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between text-slate-300">
+                <span>แรงกระแสน้ำโลก (Global)</span>
+                <span className="text-sky-300">{(map.geography.currentStrength ?? 1).toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min={0.2}
+                max={2.0}
+                step={0.1}
+                value={map.geography.currentStrength ?? 1.0}
+                onChange={(e) =>
+                  onUpdateGeography({ currentStrength: Number(e.target.value) })
+                }
+                className="w-full"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-0.5">
+              <span className="text-slate-400">การหมุน Coriolis</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => onUpdateGeography({ coriolisDirection: 'normal' })}
+                  className={`px-2 py-0.5 rounded border text-[10px] cursor-pointer ${
+                    (map.geography.coriolisDirection ?? 'normal') === 'normal'
+                      ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                      : 'bg-[#151d28] border-slate-800 text-slate-400'
+                  }`}
+                >
+                  ปกติ
+                </button>
+                <button
+                  onClick={() => onUpdateGeography({ coriolisDirection: 'reversed' })}
+                  className={`px-2 py-0.5 rounded border text-[10px] cursor-pointer ${
+                    map.geography.coriolisDirection === 'reversed'
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                      : 'bg-[#151d28] border-slate-800 text-slate-400'
+                  }`}
+                >
+                  กลับทิศ
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {(map.manualCurrents ?? []).length > 0 && (
+            <div className="space-y-1 max-h-36 overflow-y-auto">
+              <div className="text-[11px] text-slate-400">
+                กระแสน้ำที่วาดเอง ({map.manualCurrents!.length} สาย)
+              </div>
+              {map.manualCurrents!.map((mc, idx) => (
+                <div
+                  key={mc.id}
+                  className="flex items-center justify-between px-2 py-1 rounded bg-[#0f1620] border border-slate-800 text-[11px]"
+                >
+                  <span className="flex items-center gap-1.5 text-slate-200">
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{
+                        backgroundColor:
+                          mc.kind === 'warm' ? '#fb923c' : mc.kind === 'cold' ? '#38bdf8' : '#2dd4bf',
+                      }}
+                    />
+                    <span>
+                      สายที่ {idx + 1} (
+                      {mc.kind === 'warm' ? 'น้ำอุ่น' : mc.kind === 'cold' ? 'น้ำเย็น' : 'กลาง'} ·{' '}
+                      {mc.strength.toFixed(1)}x)
+                    </span>
+                  </span>
+                  <button
+                    onClick={() => onDeleteManualCurrent(mc.id)}
+                    className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                    title="ลบกระแสน้ำสายนี้"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {tool === 'territory' && (
@@ -1037,138 +1230,207 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
         </div>
       )}
 
-      {/* Special Features Palette (Matching user screenshot 2) */}
+      {/* Special Features Palette (Collapsible Accordion) */}
       <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-200">ลักษณะพิเศษ</h3>
-          {activeFeature !== null && (
+          <button
+            onClick={() => toggleSection('features')}
+            className="flex items-center gap-1 text-xs font-semibold text-slate-200 hover:text-amber-300 cursor-pointer"
+          >
+            {openSections.features ? (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span>ลักษณะพิเศษ ({allFeatures.length})</span>
+          </button>
+          <div className="flex items-center gap-2">
+            {activeFeature !== null && (
+              <button
+                onClick={() => onSelectFeature(null)}
+                className="text-[10px] text-amber-300 hover:underline cursor-pointer"
+              >
+                กลับไประบายพื้น
+              </button>
+            )}
             <button
-              onClick={() => onSelectFeature(null)}
-              className="text-[10px] text-amber-300 hover:underline cursor-pointer"
+              onClick={() => onOpenCustomModal('features')}
+              className="flex items-center gap-0.5 text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
             >
-              กลับไประบายภูมิประเทศ
+              <Plus className="w-3 h-3" />
+              เพิ่ม/ปรับแต่ง
             </button>
-          )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          {SPECIAL_FEATURES.map((f) => {
-            const active = activeFeature === f.id;
-            return (
+        {openSections.features && (
+          <>
+            <div className="flex flex-wrap gap-1.5">
+              {allFeatures.map((f) => {
+                const active = activeFeature === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => onSelectFeature(active ? null : f.id)}
+                    title={
+                      f.placement === 'water'
+                        ? 'วางบนช่องน้ำ/ทะเล'
+                        : f.placement === 'coast'
+                        ? 'วางบนชายฝั่ง'
+                        : f.placement === 'any'
+                        ? 'วางได้ทุกที่'
+                        : 'วางบนพื้นดิน'
+                    }
+                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] border transition cursor-pointer ${
+                      active
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-medium'
+                        : 'bg-[#101720] border-slate-700/80 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-[3px] shrink-0"
+                      style={{ backgroundColor: f.color }}
+                    />
+                    <span>{f.nameTh}</span>
+                    {f.isCustom && (
+                      <span className="text-[9px] text-violet-300">★</span>
+                    )}
+                  </button>
+                );
+              })}
+
               <button
-                key={f.id}
-                onClick={() => onSelectFeature(active ? null : f.id)}
-                title={
-                  f.placement === 'water'
-                    ? 'วางบนช่องน้ำ/ทะเล'
-                    : f.placement === 'coast'
-                    ? 'วางบนชายฝั่ง'
-                    : 'วางบนพื้นดิน'
-                }
+                onClick={() => onSelectFeature(activeFeature === '' ? null : '')}
                 className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] border transition cursor-pointer ${
-                  active
-                    ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-medium'
-                    : 'bg-[#101720] border-slate-700/80 text-slate-300 hover:border-slate-500'
+                  activeFeature === ''
+                    ? 'bg-rose-500/20 border-rose-400 text-rose-200 font-medium'
+                    : 'bg-[#101720] border-slate-700/80 text-slate-400 hover:border-slate-500'
                 }`}
               >
-                <span
-                  className="w-2.5 h-2.5 rounded-[3px] shrink-0"
-                  style={{ backgroundColor: f.color }}
-                />
-                <span>{f.nameTh}</span>
+                <span className="w-2.5 h-2.5 rounded-[3px] bg-slate-500/60 border border-slate-400/50 shrink-0" />
+                <span>ลบลักษณะพิเศษ</span>
               </button>
-            );
-          })}
+            </div>
 
+            <div className="pt-2 border-t border-slate-800 space-y-1.5">
+              <div className="text-[11px] font-medium text-slate-300">
+                ระบบหน้าผา & น้ำตื้นอัตโนมัติ
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoShallowWater}
+                  onChange={onToggleAutoShallowWater}
+                  className="rounded border-slate-600 bg-[#0f1620] accent-sky-400 cursor-pointer"
+                />
+                <span>น้ำตื้นอัตโนมัติใกล้แผ่นดิน (เว้นหน้าผา)</span>
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={onSyncShallowWater}
+                  className="flex items-center justify-center gap-1 py-1 px-2 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-[11px] text-sky-200 transition cursor-pointer"
+                  title="คำนวณทะเลน้ำตื้นรอบแผ่นดินทั้งหมด (ยกเว้นบริเวณที่มีหน้าผา)"
+                >
+                  <Waves className="w-3 h-3 shrink-0" />
+                  <span className="truncate">อัปเดตน้ำตื้นทั้งแผนที่</span>
+                </button>
+                <button
+                  onClick={onAutoGenerateCliffs}
+                  className="flex items-center justify-center gap-1 py-1 px-2 rounded bg-stone-500/20 hover:bg-stone-500/30 border border-stone-500/50 text-[11px] text-stone-200 transition cursor-pointer"
+                  title="สร้างหน้าผาตามชายฝั่งสูงชันและปรับทะเลน้ำตื้น/น้ำลึกอัตโนมัติ"
+                >
+                  <Mountain className="w-3 h-3 shrink-0" />
+                  <span className="truncate">สร้างหน้าผาชายฝั่งอัตโนมัติ</span>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Physical Terrain (Collapsible Accordion) */}
+      <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
+        <div className="flex items-center justify-between">
           <button
-            onClick={() => onSelectFeature(activeFeature === '' ? null : '')}
-            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] border transition cursor-pointer ${
-              activeFeature === ''
-                ? 'bg-rose-500/20 border-rose-400 text-rose-200 font-medium'
-                : 'bg-[#101720] border-slate-700/80 text-slate-400 hover:border-slate-500'
-            }`}
+            onClick={() => toggleSection('terrains')}
+            className="flex items-center gap-1 text-xs font-semibold text-slate-200 hover:text-amber-300 cursor-pointer"
           >
-            <span className="w-2.5 h-2.5 rounded-[3px] bg-slate-500/60 border border-slate-400/50 shrink-0" />
-            <span>ลบลักษณะพิเศษ</span>
+            {openSections.terrains ? (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span>ภูมิประเทศ ({allTerrains.length})</span>
+          </button>
+          <button
+            onClick={() => onOpenCustomModal('terrains')}
+            className="flex items-center gap-0.5 text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
+          >
+            <Plus className="w-3 h-3" />
+            เพิ่ม/ปรับแต่ง
           </button>
         </div>
 
-        <div className="pt-2 border-t border-slate-800 space-y-1.5">
-          <div className="text-[11px] font-medium text-slate-300">
-            ระบบหน้าผา & น้ำตื้นอัตโนมัติ
+        {openSections.terrains && (
+          <div className="space-y-0.5">
+            {allTerrains.map((t) => {
+              const count = terrainCounts.get(t.id) ?? 0;
+              const selected =
+                tool === 'terrain' &&
+                terrainEditMode === 'paint' &&
+                activeFeature === null &&
+                activeTerrain === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    onSelectFeature(null);
+                    onChangeTerrainEditMode('paint');
+                    onSelectTerrain(t.id);
+                  }}
+                  title={`${t.nameTh} · มาตรฐาน ${formatElevationMeters(t.defaultElevation)}`}
+                  className={`w-full flex items-center justify-between px-2 py-1 rounded text-xs transition cursor-pointer ${
+                    selected
+                      ? 'bg-amber-500/18 border border-amber-500/60 text-amber-100'
+                      : 'hover:bg-[#1c2635] border border-transparent text-slate-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <span
+                      className="w-3.5 h-3.5 rounded-sm border border-white/20 shrink-0"
+                      style={{ backgroundColor: t.color }}
+                    />
+                    <span className="truncate">
+                      {t.nameTh}
+                      {t.isCustom && (
+                        <span className="ml-1 text-[9px] text-violet-300">[Custom]</span>
+                      )}
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 tabular-nums ml-2">
+                    {formatElevationMeters(t.defaultElevation)} · {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={autoShallowWater}
-              onChange={onToggleAutoShallowWater}
-              className="rounded border-slate-600 bg-[#0f1620] accent-sky-400 cursor-pointer"
-            />
-            <span>น้ำตื้นอัตโนมัติใกล้แผ่นดิน (เว้นหน้าผา)</span>
-          </label>
-          <div className="grid grid-cols-2 gap-1.5">
-            <button
-              onClick={onSyncShallowWater}
-              className="flex items-center justify-center gap-1 py-1 px-2 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-[11px] text-sky-200 transition cursor-pointer"
-              title="คำนวณทะเลน้ำตื้นรอบแผ่นดินทั้งหมด (ยกเว้นบริเวณที่มีหน้าผา)"
-            >
-              <Waves className="w-3 h-3 shrink-0" />
-              <span className="truncate">อัปเดตน้ำตื้นทั้งแผนที่</span>
-            </button>
-            <button
-              onClick={onAutoGenerateCliffs}
-              className="flex items-center justify-center gap-1 py-1 px-2 rounded bg-stone-500/20 hover:bg-stone-500/30 border border-stone-500/50 text-[11px] text-stone-200 transition cursor-pointer"
-              title="สร้างหน้าผาตามชายฝั่งสูงชันและปรับทะเลน้ำตื้น/น้ำลึกอัตโนมัติ"
-            >
-              <Mountain className="w-3 h-3 shrink-0" />
-              <span className="truncate">สร้างหน้าผาชายฝั่งอัตโนมัติ</span>
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Physical Terrain (Landforms & Water) */}
+      {/* Ecological Biomes (Collapsible Accordion) */}
       <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-200">ภูมิประเทศ (Terrain)</h3>
-          <span className="text-[10px] text-slate-500">โครงสร้างพื้นผิว</span>
-        </div>
-
-        <div className="space-y-0.5">
-          {TERRAINS.map((t) => {
-            const count = terrainCounts.get(t.id) ?? 0;
-            const selected = tool === 'terrain' && activeFeature === null && activeTerrain === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => {
-                  onSelectFeature(null);
-                  onSelectTerrain(t.id);
-                }}
-                className={`w-full flex items-center justify-between px-2 py-1 rounded text-xs transition cursor-pointer ${
-                  selected
-                    ? 'bg-amber-500/18 border border-amber-500/60 text-amber-100'
-                    : 'hover:bg-[#1c2635] border border-transparent text-slate-300'
-                }`}
-              >
-                <span className="flex items-center gap-2 truncate">
-                  <span
-                    className="w-3.5 h-3.5 rounded-sm border border-white/20 shrink-0"
-                    style={{ backgroundColor: t.color }}
-                  />
-                  <span className="truncate">{t.nameTh}</span>
-                </span>
-                <span className="text-[11px] text-slate-400 tabular-nums ml-2">{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Ecological Biomes & Custom Biome Button */}
-      <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-200">ไบโอม (Biomes)</h3>
+          <button
+            onClick={() => toggleSection('biomes')}
+            className="flex items-center gap-1 text-xs font-semibold text-slate-200 hover:text-emerald-300 cursor-pointer"
+          >
+            {openSections.biomes ? (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span>ไบโอม ({paintableBiomes.length})</span>
+          </button>
           <button
             onClick={() => onOpenCustomModal('biomes')}
             className="flex items-center gap-0.5 text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
@@ -1178,46 +1440,58 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           </button>
         </div>
 
-        <div className="space-y-0.5 max-h-60 overflow-y-auto pr-0.5">
-          {paintableBiomes.map((b) => {
-            const count = biomeCounts.get(b.id) ?? 0;
-            const selected = tool === 'biome' && activeBiome === b.id;
-            return (
-              <button
-                key={b.id}
-                onClick={() => {
-                  onSelectFeature(null);
-                  onSelectBiome(b.id);
-                }}
-                className={`w-full flex items-center justify-between px-2 py-1 rounded text-xs transition cursor-pointer ${
-                  selected
-                    ? 'bg-emerald-500/18 border border-emerald-500/60 text-emerald-100'
-                    : 'hover:bg-[#1c2635] border border-transparent text-slate-300'
-                }`}
-              >
-                <span className="flex items-center gap-2 truncate">
-                  <span
-                    className="w-3.5 h-3.5 rounded-sm border border-white/20 shrink-0"
-                    style={{ backgroundColor: b.color }}
-                  />
-                  <span className="truncate">
-                    {b.nameTh}
-                    {b.isCustom && (
-                      <span className="ml-1 text-[9px] text-violet-300">[Custom]</span>
-                    )}
+        {openSections.biomes && (
+          <div className="space-y-0.5 max-h-60 overflow-y-auto pr-0.5">
+            {paintableBiomes.map((b) => {
+              const count = biomeCounts.get(b.id) ?? 0;
+              const selected = tool === 'biome' && activeBiome === b.id;
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => {
+                    onSelectFeature(null);
+                    onSelectBiome(b.id);
+                  }}
+                  className={`w-full flex items-center justify-between px-2 py-1 rounded text-xs transition cursor-pointer ${
+                    selected
+                      ? 'bg-emerald-500/18 border border-emerald-500/60 text-emerald-100'
+                      : 'hover:bg-[#1c2635] border border-transparent text-slate-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <span
+                      className="w-3.5 h-3.5 rounded-sm border border-white/20 shrink-0"
+                      style={{ backgroundColor: b.color }}
+                    />
+                    <span className="truncate">
+                      {b.nameTh}
+                      {b.isCustom && (
+                        <span className="ml-1 text-[9px] text-violet-300">[Custom]</span>
+                      )}
+                    </span>
                   </span>
-                </span>
-                <span className="text-[11px] text-slate-400 tabular-nums ml-2">{count}</span>
-              </button>
-            );
-          })}
-        </div>
+                  <span className="text-[11px] text-slate-400 tabular-nums ml-2">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* POIs Legend & Custom POI Button */}
+      {/* POIs Legend (Collapsible Accordion) */}
       <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-200">สถานที่น่าสนใจ</h3>
+          <button
+            onClick={() => toggleSection('pois')}
+            className="flex items-center gap-1 text-xs font-semibold text-slate-200 hover:text-amber-300 cursor-pointer"
+          >
+            {openSections.pois ? (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            )}
+            <span>สถานที่น่าสนใจ ({allPoiTypes.length})</span>
+          </button>
           <button
             onClick={() => onOpenCustomModal('pois')}
             className="flex items-center gap-0.5 text-[11px] text-amber-300 hover:text-amber-200 cursor-pointer"
@@ -1226,29 +1500,41 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             เพิ่ม POI เอง
           </button>
         </div>
-        <div className="space-y-1">
-          {allPoiTypes.map((p) => (
-            <div
-              key={p.id}
-              className="flex items-center justify-between px-1.5 py-0.5 text-xs text-slate-300"
-            >
-              <span className="flex items-center gap-2">
-                <span>{p.symbol}</span>
-                <span>{p.label}</span>
-              </span>
-              <span className="text-[11px] text-slate-400 tabular-nums">
-                {poiCounts.get(p.id) ?? 0}
-              </span>
-            </div>
-          ))}
-        </div>
+        {openSections.pois && (
+          <div className="space-y-1">
+            {allPoiTypes.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between px-1.5 py-0.5 text-xs text-slate-300"
+              >
+                <span className="flex items-center gap-2">
+                  <span>{p.symbol}</span>
+                  <span>{p.label}</span>
+                </span>
+                <span className="text-[11px] text-slate-400 tabular-nums">
+                  {poiCounts.get(p.id) ?? 0}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Summary & Export Actions */}
       <div className="bg-[#151d28] border border-slate-800 rounded-lg p-3 space-y-2.5">
-        <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wide">
-          ข้อมูลแผนที่
-        </h3>
+        <button
+          onClick={() => toggleSection('summary')}
+          className="flex items-center gap-1 text-xs font-semibold text-slate-200 uppercase tracking-wide cursor-pointer"
+        >
+          {openSections.summary ? (
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+          )}
+          <span>ข้อมูลแผนที่</span>
+        </button>
+        {openSections.summary && (
+          <>
         <div className="space-y-1 text-xs">
           <div className="flex justify-between">
             <span className="text-slate-400">พื้นที่แผ่นดิน</span>
@@ -1301,6 +1587,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             ล้างแผนที่
           </button>
         </div>
+          </>
+        )}
       </div>
     </aside>
   );

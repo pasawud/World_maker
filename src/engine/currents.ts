@@ -1,4 +1,4 @@
-import { GeographyConfig, TerrainId, WindMode } from '../types/map';
+import { GeographyConfig, ManualCurrentPath, TerrainId, WindMode } from '../types/map';
 import { getNeighbors, hexIndex } from './hexMath';
 
 export type CurrentKind = 'none' | 'warm' | 'cold' | 'neutral';
@@ -79,14 +79,16 @@ function isOceanCell(
 
 /**
  * Compute physical surface ocean currents (warm western-boundary currents,
- * cold eastern-boundary currents, equatorial/mid-latitude/polar gyres, and monsoon drift).
+ * cold eastern-boundary currents, equatorial/mid-latitude/polar gyres, monsoon drift,
+ * Coriolis polarity, current strength scaling, and user-drawn manual currents).
  */
 export function computeOceanCurrents(
   width: number,
   height: number,
   elevation: ArrayLike<number>,
   config: GeographyConfig,
-  terrains?: ArrayLike<number>
+  terrains?: ArrayLike<number>,
+  manualCurrents?: ManualCurrentPath[]
 ): OceanCurrentField {
   const total = width * height;
   const dx = new Float32Array(total);
@@ -94,7 +96,8 @@ export function computeOceanCurrents(
   const thermal = new Float32Array(total);
   const speed = new Float32Array(total);
 
-  if (config.oceanCurrents === false) {
+  const hasManual = Boolean(manualCurrents && manualCurrents.length > 0);
+  if (config.oceanCurrents === false && !hasManual) {
     return { dx, dy, thermal, speed };
   }
 
@@ -105,129 +108,179 @@ export function computeOceanCurrents(
     }
   }
 
+  const strengthMul = Math.max(0.2, Math.min(2.0, config.currentStrength ?? 1.0));
+  const coriolisSign = config.coriolisDirection === 'reversed' ? -1 : 1;
   const uniformWind = getUniformWindDir(config.windMode);
   const maxScan = Math.min(7, Math.max(3, Math.floor(width * 0.12)));
 
-  for (let r = 0; r < height; r++) {
-    const lat = getRowLat(r, height, config);
-    const absLat = Math.abs(lat);
-    const hemi = lat >= 0 ? 1 : -1;
+  if (config.oceanCurrents !== false) {
+    for (let r = 0; r < height; r++) {
+      const lat = getRowLat(r, height, config);
+      const absLat = Math.abs(lat);
+      const hemi = (lat >= 0 ? 1 : -1) * coriolisSign;
 
-    for (let q = 0; q < width; q++) {
-      const idx = hexIndex(q, r, width);
-      if (!isOcean[idx]) continue;
+      for (let q = 0; q < width; q++) {
+        const idx = hexIndex(q, r, width);
+        if (!isOcean[idx]) continue;
 
-      const lon = getColLon(q, width, config);
+        const lon = getColLon(q, width, config);
 
-      // Measure distance to land strictly west (-q) and east (+q)
-      let distWestLand = maxScan + 1;
-      for (let d = 1; d <= maxScan; d++) {
-        const wq = q - d;
-        if (wq < 0) break;
-        if (!isOcean[hexIndex(wq, r, width)]) {
-          distWestLand = d;
-          break;
+        // Measure distance to land strictly west (-q) and east (+q)
+        let distWestLand = maxScan + 1;
+        for (let d = 1; d <= maxScan; d++) {
+          const wq = q - d;
+          if (wq < 0) break;
+          if (!isOcean[hexIndex(wq, r, width)]) {
+            distWestLand = d;
+            break;
+          }
         }
-      }
 
-      let distEastLand = maxScan + 1;
-      for (let d = 1; d <= maxScan; d++) {
-        const eq = q + d;
-        if (eq >= width) break;
-        if (!isOcean[hexIndex(eq, r, width)]) {
-          distEastLand = d;
-          break;
+        let distEastLand = maxScan + 1;
+        for (let d = 1; d <= maxScan; d++) {
+          const eq = q + d;
+          if (eq >= width) break;
+          if (!isOcean[hexIndex(eq, r, width)]) {
+            distEastLand = d;
+            break;
+          }
         }
-      }
 
-      let vx = 0;
-      let vy = 0;
-      let th = 0;
-      let sp = 0.72;
+        let vx = 0;
+        let vy = 0;
+        let th = 0;
+        let sp = 0.72;
 
-      if (uniformWind) {
-        vx = uniformWind.dx;
-        vy = uniformWind.dy;
-        th = absLat < 22 ? 0.55 : absLat > 55 ? -0.55 : 0.15 - (absLat - 22) * 0.018;
-        sp = 0.78;
-        // Boundary deflection along western/eastern coasts
-        if (distWestLand <= 3 && vx < 0) {
-          vy = -0.78 * hemi;
-          vx = 0.25;
-          th = Math.max(th, 0.45);
-        } else if (distEastLand <= 3 && vx > 0) {
-          vy = 0.78 * hemi;
-          vx = -0.25;
-          th = Math.min(th, -0.45);
-        }
-      } else if (
-        config.windMode === 'monsoon' &&
-        lat >= -10 &&
-        lat <= 26 &&
-        lon >= 50 &&
-        lon <= 145
-      ) {
-        // Indian Ocean / South China Sea SW Monsoon Drift (warm)
-        vx = 0.76;
-        vy = -0.65;
-        th = 0.85;
-        sp = 0.92;
-      } else if (absLat < 16) {
-        // Equatorial Current (flows E -> W, warm)
-        vx = -0.96;
-        vy = -0.14 * hemi;
-        th = 0.72;
-        sp = 0.86;
-      } else if (absLat <= 58) {
-        // Subtropical / Subpolar Gyres:
-        // Western ocean boundary (east of continent, distWestLand small) -> Warm poleward current
-        // Eastern ocean boundary (west of continent, distEastLand small) -> Cold equatorward current
-        const nearWestCoast = distWestLand <= maxScan && distWestLand <= distEastLand;
-        const nearEastCoast = distEastLand <= maxScan && distEastLand < distWestLand;
+        if (uniformWind) {
+          vx = uniformWind.dx;
+          vy = uniformWind.dy;
+          th = absLat < 22 ? 0.55 : absLat > 55 ? -0.55 : 0.15 - (absLat - 22) * 0.018;
+          sp = 0.78;
+          // Boundary deflection along western/eastern coasts
+          if (distWestLand <= 3 && vx < 0) {
+            vy = -0.78 * hemi;
+            vx = 0.25;
+            th = Math.max(th, 0.45);
+          } else if (distEastLand <= 3 && vx > 0) {
+            vy = 0.78 * hemi;
+            vx = -0.25;
+            th = Math.min(th, -0.45);
+          }
+        } else if (
+          config.windMode === 'monsoon' &&
+          lat >= -10 &&
+          lat <= 26 &&
+          lon >= 50 &&
+          lon <= 145
+        ) {
+          // Indian Ocean / South China Sea SW Monsoon Drift (warm)
+          vx = 0.76 * coriolisSign;
+          vy = -0.65 * coriolisSign;
+          th = 0.85;
+          sp = 0.92;
+        } else if (absLat < 16) {
+          // Equatorial Current (flows E -> W under normal Coriolis, warm)
+          vx = -0.96 * coriolisSign;
+          vy = -0.14 * hemi;
+          th = 0.72;
+          sp = 0.86;
+        } else if (absLat <= 58) {
+          // Subtropical / Subpolar Gyres:
+          const nearWestCoast = distWestLand <= maxScan && distWestLand <= distEastLand;
+          const nearEastCoast = distEastLand <= maxScan && distEastLand < distWestLand;
 
-        if (nearWestCoast) {
-          const blend = 1 - (distWestLand - 1) / maxScan;
-          vx = 0.36;
-          vy = -0.93 * hemi;
-          th = 0.55 + 0.42 * blend;
-          sp = 0.94;
-        } else if (nearEastCoast) {
-          const blend = 1 - (distEastLand - 1) / maxScan;
-          vx = -0.36;
-          vy = 0.93 * hemi;
-          th = -(0.55 + 0.42 * blend);
-          sp = 0.9;
-        } else if (absLat < 34) {
-          // Trade-wind return branch of subtropical gyre (E -> W)
-          vx = -0.88;
-          vy = -0.22 * hemi;
-          th = 0.36;
-          sp = 0.74;
+          if (nearWestCoast) {
+            const blend = 1 - (distWestLand - 1) / maxScan;
+            vx = 0.36 * coriolisSign;
+            vy = -0.93 * hemi;
+            th = (0.55 + 0.42 * blend) * coriolisSign;
+            sp = 0.94;
+          } else if (nearEastCoast) {
+            const blend = 1 - (distEastLand - 1) / maxScan;
+            vx = -0.36 * coriolisSign;
+            vy = 0.93 * hemi;
+            th = -(0.55 + 0.42 * blend) * coriolisSign;
+            sp = 0.9;
+          } else if (absLat < 34) {
+            // Trade-wind return branch of subtropical gyre
+            vx = -0.88 * coriolisSign;
+            vy = -0.22 * hemi;
+            th = 0.36;
+            sp = 0.74;
+          } else {
+            // Mid-latitude West Wind Drift
+            vx = 0.92 * coriolisSign;
+            vy = -0.16 * hemi;
+            th = 0.08 - (absLat - 34) * 0.015;
+            sp = 0.8;
+          }
         } else {
-          // Mid-latitude West Wind Drift (W -> E)
-          vx = 0.92;
-          vy = -0.16 * hemi;
-          th = 0.08 - (absLat - 34) * 0.015;
-          sp = 0.8;
+          // Cold Polar Current / Antarctic Circumpolar Current
+          if (lat < -55) {
+            vx = 0.96 * coriolisSign;
+            vy = 0.12;
+          } else {
+            vx = -0.86 * coriolisSign;
+            vy = 0.28 * hemi;
+          }
+          th = -0.84;
+          sp = 0.85;
         }
-      } else {
-        // Cold Polar Current / Antarctic Circumpolar Current
-        if (lat < -55) {
-          vx = 0.96;
-          vy = 0.12;
-        } else {
-          vx = -0.86;
-          vy = 0.28 * hemi;
-        }
-        th = -0.84;
-        sp = 0.85;
-      }
 
-      const len = Math.hypot(vx, vy) || 1;
-      dx[idx] = vx / len;
-      dy[idx] = vy / len;
-      thermal[idx] = Math.max(-1, Math.min(1, th));
-      speed[idx] = sp;
+        const len = Math.hypot(vx, vy) || 1;
+        dx[idx] = vx / len;
+        dy[idx] = vy / len;
+        const scaledThermal = th * (0.65 + 0.35 * strengthMul);
+        thermal[idx] = Math.max(-1, Math.min(1, scaledThermal));
+        speed[idx] = Math.min(1, sp * strengthMul);
+      }
+    }
+  }
+
+  // Blend user-drawn manual current paths into the ocean vector field
+  if (manualCurrents && manualCurrents.length > 0) {
+    for (const mc of manualCurrents) {
+      if (!mc.points || mc.points.length < 2) continue;
+      const targetTh = mc.kind === 'warm' ? 0.88 : mc.kind === 'cold' ? -0.88 : 0.0;
+      const mcStrength = Math.max(0.3, Math.min(2.0, mc.strength || 1.0));
+      const targetSp = Math.min(1.0, mcStrength * 0.65);
+
+      for (let i = 0; i < mc.points.length - 1; i++) {
+        const p0 = mc.points[i];
+        const p1 = mc.points[i + 1];
+        const segX = p1.q - p0.q;
+        const segY = p1.r - p0.r;
+        const segLen = Math.hypot(segX, segY) || 1;
+        const ndx = segX / segLen;
+        const ndy = segY / segLen;
+
+        const steps = Math.max(1, Math.ceil(segLen * 2));
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          const cq = Math.round(p0.q + segX * t);
+          const cr = Math.round(p0.r + segY * t);
+          for (let dr = -2; dr <= 2; dr++) {
+            for (let dq = -2; dq <= 2; dq++) {
+              const nq = cq + dq;
+              const nr = cr + dr;
+              if (nq < 0 || nq >= width || nr < 0 || nr >= height) continue;
+              const dist = Math.hypot(dq, dr);
+              if (dist > 2.2) continue;
+              const idx = hexIndex(nq, nr, width);
+              if (!isOcean[idx]) continue;
+
+              const w = Math.max(0.25, 1 - dist / 2.4);
+              const bx = dx[idx] * (1 - w) + ndx * w;
+              const by = dy[idx] * (1 - w) + ndy * w;
+              const bLen = Math.hypot(bx, by) || 1;
+              dx[idx] = bx / bLen;
+              dy[idx] = by / bLen;
+              thermal[idx] = Math.max(-1, Math.min(1, thermal[idx] * (1 - w) + targetTh * w));
+              speed[idx] = Math.max(speed[idx], targetSp * (0.7 + 0.3 * w));
+            }
+          }
+        }
+      }
     }
   }
 

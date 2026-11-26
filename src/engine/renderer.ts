@@ -1,11 +1,16 @@
 import { getBiomeMetaWithCustom, getPaintableBiomes } from '../data/biomes';
-import { getFeatureMeta } from '../data/features';
+import { getFeatureMetaWithCustom } from '../data/features';
 import {
   getAllCultureTypes,
   getAllGovernmentTypes,
   getAllPoiTypes,
 } from '../data/goods';
-import { getTerrainMeta, isWaterTerrain, TERRAINS } from '../data/terrains';
+import {
+  getAllTerrains,
+  getTerrainMetaWithCustom,
+  isWaterTerrainWithCustom,
+  TerrainMeta,
+} from '../data/terrains';
 import {
   BiomeDetailStyle,
   BiomeId,
@@ -14,6 +19,7 @@ import {
   HexCoord,
   HexMapData,
   LayerVisibility,
+  SpecialFeatureMeta,
   TerrainId,
   ToolMode,
 } from '../types/map';
@@ -65,12 +71,16 @@ function mixRgb(a: [number, number, number], b: [number, number, number], t: num
 }
 
 function elevationColor(e: number): string {
-  if (e <= -0.35) return '#122c47';
-  if (e <= 0) return mixRgb([24, 66, 108], [58, 128, 168], (e + 0.35) / 0.35);
-  if (e <= 0.25) return mixRgb([72, 134, 72], [174, 184, 96], e / 0.25);
-  if (e <= 0.55) return mixRgb([174, 184, 96], [148, 102, 66], (e - 0.25) / 0.3);
-  if (e <= 0.78) return mixRgb([148, 102, 66], [190, 182, 174], (e - 0.55) / 0.23);
-  return '#f2f6fa';
+  const c = Math.max(-1, Math.min(1, Number.isFinite(e) ? e : 0));
+  if (c <= -0.65) return mixRgb([8, 24, 48], [16, 46, 82], (c + 1) / 0.35);
+  if (c <= -0.25) return mixRgb([16, 46, 82], [32, 88, 134], (c + 0.65) / 0.4);
+  if (c <= 0) return mixRgb([32, 88, 134], [82, 166, 198], (c + 0.25) / 0.25);
+  if (c <= 0.14) return mixRgb([62, 132, 74], [116, 162, 84], c / 0.14);
+  if (c <= 0.32) return mixRgb([116, 162, 84], [182, 190, 98], (c - 0.14) / 0.18);
+  if (c <= 0.48) return mixRgb([182, 190, 98], [186, 144, 78], (c - 0.32) / 0.16);
+  if (c <= 0.58) return mixRgb([186, 144, 78], [154, 102, 62], (c - 0.48) / 0.1);
+  if (c <= 0.78) return mixRgb([154, 102, 62], [178, 168, 160], (c - 0.58) / 0.2);
+  return mixRgb([178, 168, 160], [246, 250, 255], (c - 0.78) / 0.22);
 }
 
 function temperatureColor(t: number): string {
@@ -422,14 +432,14 @@ export function drawTerrainDetail(
   cx: number,
   cy: number,
   radius: number,
-  terrainId: TerrainId,
+  terrainMeta: TerrainMeta,
   biomeId: number,
   temp: number,
   neutralStyle: boolean
 ): void {
   const r = radius;
-  switch (terrainId) {
-    case TerrainId.HILLS: {
+  switch (terrainMeta.reliefStyle) {
+    case 'hills': {
       ctx.save();
       ctx.lineCap = 'round';
       ctx.strokeStyle = 'rgba(38, 30, 20, 0.5)';
@@ -449,7 +459,7 @@ export function drawTerrainDetail(
       ctx.restore();
       break;
     }
-    case TerrainId.HIGHLAND: {
+    case 'highland': {
       ctx.save();
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -480,7 +490,7 @@ export function drawTerrainDetail(
       ctx.restore();
       break;
     }
-    case TerrainId.MOUNTAIN: {
+    case 'mountain': {
       const isIcy = !neutralStyle && (biomeId === BiomeId.SNOW_ICE || temp <= -3);
       const isArid = !neutralStyle && (biomeId === BiomeId.DESERT || biomeId === BiomeId.SAVANNA);
       const isLush =
@@ -532,7 +542,7 @@ export function drawTerrainDetail(
       }
       break;
     }
-    case TerrainId.HIGH_PEAK: {
+    case 'peak': {
       const hasSnowCap =
         neutralStyle ||
         biomeId === BiomeId.SNOW_ICE ||
@@ -579,6 +589,87 @@ export function drawTerrainDetail(
         ctx.closePath();
         ctx.fill();
       }
+      break;
+    }
+    case 'plateau': {
+      ctx.save();
+      ctx.fillStyle = 'rgba(72, 42, 26, 0.35)';
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.46, cy + r * 0.26);
+      ctx.lineTo(cx - r * 0.3, cy - r * 0.22);
+      ctx.lineTo(cx + r * 0.3, cy - r * 0.22);
+      ctx.lineTo(cx + r * 0.46, cy + r * 0.26);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 224, 178, 0.45)';
+      ctx.lineWidth = Math.max(1, r * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.28, cy - r * 0.22);
+      ctx.lineTo(cx + r * 0.28, cy - r * 0.22);
+      ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 'canyon': {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(20, 14, 10, 0.72)';
+      ctx.lineWidth = Math.max(1.5, r * 0.14);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.42, cy - r * 0.18);
+      ctx.lineTo(cx - r * 0.1, cy + r * 0.1);
+      ctx.lineTo(cx + r * 0.16, cy - r * 0.06);
+      ctx.lineTo(cx + r * 0.42, cy + r * 0.2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(220, 175, 130, 0.42)';
+      ctx.lineWidth = Math.max(0.8, r * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.4, cy - r * 0.25);
+      ctx.lineTo(cx - r * 0.08, cy + r * 0.02);
+      ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 'crater': {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(25, 22, 20, 0.65)';
+      ctx.lineWidth = Math.max(1.3, r * 0.11);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r * 0.42, r * 0.28, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(15, 15, 20, 0.35)';
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'volcano': {
+      ctx.save();
+      ctx.fillStyle = '#47312c';
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.52, cy + r * 0.34);
+      ctx.lineTo(cx - r * 0.14, cy - r * 0.45);
+      ctx.lineTo(cx + r * 0.14, cy - r * 0.45);
+      ctx.lineTo(cx + r * 0.52, cy + r * 0.34);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fb923c';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - r * 0.44, r * 0.14, r * 0.07, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'ice_shelf': {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(224, 242, 254, 0.72)';
+      ctx.lineWidth = Math.max(1, r * 0.07);
+      for (const offset of [-0.18, 0.04, 0.24]) {
+        ctx.beginPath();
+        ctx.moveTo(cx - r * 0.36, cy + r * offset);
+        ctx.lineTo(cx + r * 0.36, cy + r * (offset - 0.08));
+        ctx.stroke();
+      }
+      ctx.restore();
       break;
     }
   }
@@ -690,12 +781,15 @@ function drawSpecialFeature(
   cx: number,
   cy: number,
   radius: number,
-  featureId: string
+  featureId: string,
+  customFeatures?: SpecialFeatureMeta[],
+  featureOverrides?: Record<string, Partial<Omit<SpecialFeatureMeta, 'id'>>>
 ): void {
   if (featureId === 'cliff') return;
-  const meta = getFeatureMeta(featureId);
+  const meta = getFeatureMetaWithCustom(featureId, customFeatures, featureOverrides);
   if (!meta) return;
   const r = radius;
+  const styleKey = meta.visualStyle && meta.visualStyle !== 'default' ? meta.visualStyle : featureId;
 
   ctx.save();
   // Soft tinted hex wash so special feature is recognizable at a glance
@@ -706,7 +800,17 @@ function drawSpecialFeature(
   ctx.lineWidth = Math.max(0.9, r * 0.06);
   ctx.stroke();
 
-  switch (featureId) {
+  if (styleKey === 'custom' && meta.symbol) {
+    ctx.font = `${Math.round(r * 0.72)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(meta.symbol, cx, cy + 1);
+    ctx.restore();
+    return;
+  }
+
+  switch (styleKey) {
     case 'oasis': {
       ctx.fillStyle = '#38bdf8';
       ctx.beginPath();
@@ -718,6 +822,7 @@ function drawSpecialFeature(
       ctx.fill();
       break;
     }
+    case 'reef':
     case 'coral_reef':
     case 'atoll': {
       ctx.strokeStyle = meta.color;
@@ -727,6 +832,7 @@ function drawSpecialFeature(
       ctx.stroke();
       break;
     }
+    case 'volcano':
     case 'volcanic_island':
     case 'volcanic_soil': {
       ctx.fillStyle = '#5c3c31';
@@ -753,12 +859,70 @@ function drawSpecialFeature(
       ctx.stroke();
       break;
     }
+    case 'geothermal':
     case 'hot_springs':
     case 'lagoon': {
       ctx.fillStyle = '#7dd3fc';
       ctx.beginPath();
       ctx.ellipse(cx, cy + r * 0.08, r * 0.32, r * 0.18, 0, 0, Math.PI * 2);
       ctx.fill();
+      break;
+    }
+    case 'whirlpool':
+    case 'maelstrom': {
+      ctx.strokeStyle = meta.color;
+      ctx.lineWidth = Math.max(1.2, r * 0.09);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.36, 0, Math.PI * 1.6);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.18, 0.5, Math.PI * 2.0);
+      ctx.stroke();
+      break;
+    }
+    case 'crystal':
+    case 'crystal_cavern': {
+      ctx.fillStyle = meta.color;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r * 0.42);
+      ctx.lineTo(cx + r * 0.22, cy);
+      ctx.lineTo(cx, cy + r * 0.38);
+      ctx.lineTo(cx - r * 0.22, cy);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 'ruins':
+    case 'ancient_ruins': {
+      ctx.strokeStyle = meta.color;
+      ctx.lineWidth = Math.max(1.3, r * 0.1);
+      ctx.strokeRect(cx - r * 0.26, cy - r * 0.18, r * 0.52, r * 0.38);
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.32, cy - r * 0.22);
+      ctx.lineTo(cx + r * 0.32, cy - r * 0.22);
+      ctx.stroke();
+      break;
+    }
+    case 'mesa': {
+      ctx.fillStyle = meta.color;
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.34, cy + r * 0.22);
+      ctx.lineTo(cx - r * 0.2, cy - r * 0.2);
+      ctx.lineTo(cx + r * 0.2, cy - r * 0.2);
+      ctx.lineTo(cx + r * 0.34, cy + r * 0.22);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case 'waterfall': {
+      ctx.strokeStyle = '#7dd3fc';
+      ctx.lineWidth = Math.max(1.5, r * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.1, cy - r * 0.32);
+      ctx.lineTo(cx - r * 0.1, cy + r * 0.28);
+      ctx.moveTo(cx + r * 0.1, cy - r * 0.32);
+      ctx.lineTo(cx + r * 0.1, cy + r * 0.28);
+      ctx.stroke();
       break;
     }
     case 'salt_flats': {
@@ -769,15 +933,22 @@ function drawSpecialFeature(
       break;
     }
     default: {
-      // Crisp colored cartographic diamond badge
-      ctx.fillStyle = meta.color;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - r * 0.26);
-      ctx.lineTo(cx + r * 0.24, cy);
-      ctx.lineTo(cx, cy + r * 0.26);
-      ctx.lineTo(cx - r * 0.24, cy);
-      ctx.closePath();
-      ctx.fill();
+      if (meta.symbol) {
+        ctx.font = `${Math.round(r * 0.65)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(meta.symbol, cx, cy + 1);
+      } else {
+        ctx.fillStyle = meta.color;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r * 0.26);
+        ctx.lineTo(cx + r * 0.24, cy);
+        ctx.lineTo(cx, cy + r * 0.26);
+        ctx.lineTo(cx - r * 0.24, cy);
+        ctx.closePath();
+        ctx.fill();
+      }
       break;
     }
   }
@@ -800,7 +971,10 @@ export class ChunkedMapRenderer {
     field: OceanCurrentField;
     streams: CurrentStreamline[];
   } {
-    const key = `${map.id}_${map.width}x${map.height}_${map.geography.latNorth}_${map.geography.latSouth}_${map.geography.lonWest ?? -180}_${map.geography.lonEast ?? 180}_${map.geography.windMode}_${map.geography.oceanCurrents !== false}`;
+    const manualSig = (map.manualCurrents ?? [])
+      .map((c) => `${c.id}:${c.kind}:${c.strength}:${c.points.length}`)
+      .join(',');
+    const key = `${map.id}_${map.width}x${map.height}_${map.geography.latNorth}_${map.geography.latSouth}_${map.geography.lonWest ?? -180}_${map.geography.lonEast ?? 180}_${map.geography.windMode}_${map.geography.oceanCurrents !== false}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}_${manualSig}`;
     if (this.currentCache && this.currentCache.key === key) {
       return this.currentCache;
     }
@@ -809,7 +983,8 @@ export class ChunkedMapRenderer {
       map.height,
       map.elevation,
       map.geography,
-      map.terrains
+      map.terrains,
+      map.manualCurrents
     );
     const streams = traceOceanCurrentStreams(
       map.width,
@@ -882,9 +1057,15 @@ export class ChunkedMapRenderer {
         const idx = hexIndex(q, r, map.width);
         const biomeId = map.biomes[idx];
         const terrainId = getHexTerrain(map, idx);
-        const terrainMeta = getTerrainMeta(terrainId);
+        const terrainMeta = getTerrainMetaWithCustom(
+          terrainId,
+          map.customTerrains,
+          map.terrainOverrides
+        );
         const meta = getBiomeMetaWithCustom(biomeId, map.customBiomes);
-        const isWater = isWaterTerrain(terrainId) || meta.isWater;
+        const isWater =
+          isWaterTerrainWithCustom(terrainId, map.customTerrains, map.terrainOverrides) ||
+          meta.isWater;
         const pos = hexToPixel(q, r, BASE_HEX_RADIUS);
         const lx = pos.x - originX;
         const ly = pos.y - originY;
@@ -995,29 +1176,35 @@ export class ChunkedMapRenderer {
             }
             if (
               !isWater &&
-              (terrainId === TerrainId.HILLS ||
-                terrainId === TerrainId.HIGHLAND ||
-                terrainId === TerrainId.MOUNTAIN ||
-                terrainId === TerrainId.HIGH_PEAK)
+              terrainMeta.reliefStyle !== 'flat' &&
+              terrainMeta.reliefStyle !== 'water' &&
+              terrainMeta.reliefStyle !== 'lake'
             ) {
-              drawTerrainDetail(ctx, lx, ly, BASE_HEX_RADIUS, terrainId, biomeId, temp, false);
+              drawTerrainDetail(ctx, lx, ly, BASE_HEX_RADIUS, terrainMeta, biomeId, temp, false);
             }
             if (layers.features && map.features?.[idx]) {
               if (map.features[idx] === 'cliff') {
                 drawCliffOverlay(ctx, map, q, r, lx, ly, BASE_HEX_RADIUS);
               } else {
-                drawSpecialFeature(ctx, lx, ly, BASE_HEX_RADIUS, map.features[idx]);
+                drawSpecialFeature(
+                  ctx,
+                  lx,
+                  ly,
+                  BASE_HEX_RADIUS,
+                  map.features[idx],
+                  map.customFeatures,
+                  map.featureOverrides
+                );
               }
             }
           } else if (overlay === 'terrain') {
             if (
               !isWater &&
-              (terrainId === TerrainId.HILLS ||
-                terrainId === TerrainId.HIGHLAND ||
-                terrainId === TerrainId.MOUNTAIN ||
-                terrainId === TerrainId.HIGH_PEAK)
+              terrainMeta.reliefStyle !== 'flat' &&
+              terrainMeta.reliefStyle !== 'water' &&
+              terrainMeta.reliefStyle !== 'lake'
             ) {
-              drawTerrainDetail(ctx, lx, ly, BASE_HEX_RADIUS, terrainId, biomeId, 15, true);
+              drawTerrainDetail(ctx, lx, ly, BASE_HEX_RADIUS, terrainMeta, biomeId, 15, true);
             }
             if (layers.features && map.features?.[idx] === 'cliff') {
               drawCliffOverlay(ctx, map, q, r, lx, ly, BASE_HEX_RADIUS);
@@ -1155,7 +1342,8 @@ export class ChunkedMapRenderer {
     }
   ): void {
     const sizeKey = `${map.width}x${map.height}`;
-    const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${options.layers.cultures}_${map.customBiomes.length}`;
+    const customSig = `${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
+    const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${options.layers.cultures}_${customSig}`;
     if (
       map.id !== this.lastMapId ||
       sizeKey !== this.lastSizeKey ||
@@ -1292,8 +1480,8 @@ function drawDynamicLayers(
 ): void {
   const { layers } = options;
 
-  // -1. Ocean current streamlines
-  if (layers.currents || options.overlay === 'currents') {
+  // -1. Ocean current streamlines + manual user-drawn currents
+  if (layers.currents || options.overlay === 'currents' || options.tool === 'current') {
     const streams =
       options.currentStreams ??
       traceOceanCurrentStreams(
@@ -1305,11 +1493,56 @@ function drawDynamicLayers(
           map.height,
           map.elevation,
           map.geography,
-          map.terrains
+          map.terrains,
+          map.manualCurrents
         ),
         map.terrains
       );
     drawOceanCurrentStreams(ctx, streams, BASE_HEX_RADIUS, zoom);
+
+    for (const mc of map.manualCurrents ?? []) {
+      if (!mc.points || mc.points.length < 2) continue;
+      ctx.save();
+      const stroke =
+        mc.kind === 'warm'
+          ? 'rgba(251, 146, 60, 0.92)'
+          : mc.kind === 'cold'
+          ? 'rgba(56, 189, 248, 0.92)'
+          : 'rgba(165, 243, 252, 0.9)';
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = Math.max(2.2, (1.8 + mc.strength * 1.4) / Math.max(0.55, zoom * 0.7));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      mc.points.forEach((pt, idx) => {
+        const p = hexToPixel(pt.q, pt.r, BASE_HEX_RADIUS);
+        if (idx === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+
+      // Arrowhead at end of manual current
+      const pPrev = hexToPixel(
+        mc.points[mc.points.length - 2].q,
+        mc.points[mc.points.length - 2].r,
+        BASE_HEX_RADIUS
+      );
+      const pEnd = hexToPixel(
+        mc.points[mc.points.length - 1].q,
+        mc.points[mc.points.length - 1].r,
+        BASE_HEX_RADIUS
+      );
+      const ang = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+      const headLen = Math.max(7, 8.5 / Math.max(0.55, zoom * 0.75));
+      ctx.fillStyle = stroke;
+      ctx.beginPath();
+      ctx.moveTo(pEnd.x, pEnd.y);
+      ctx.lineTo(pEnd.x - Math.cos(ang - 0.52) * headLen, pEnd.y - Math.sin(ang - 0.52) * headLen);
+      ctx.lineTo(pEnd.x - Math.cos(ang + 0.52) * headLen, pEnd.y - Math.sin(ang + 0.52) * headLen);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   // 0. Lat/Lon Graticule lines & labels
@@ -1617,9 +1850,15 @@ function drawDynamicLayers(
 
   if (options.draftPath.length > 1) {
     ctx.save();
-    ctx.strokeStyle = options.tool === 'river' ? '#38bdf8' : '#fbbf24';
-    ctx.lineWidth = 3.2;
+    ctx.strokeStyle =
+      options.tool === 'river'
+        ? '#38bdf8'
+        : options.tool === 'current'
+        ? '#fb923c'
+        : '#fbbf24';
+    ctx.lineWidth = options.tool === 'current' ? 3.8 : 3.2;
     ctx.lineCap = 'round';
+    if (options.tool === 'current') ctx.setLineDash([7, 5]);
     ctx.beginPath();
     options.draftPath.forEach((h, i) => {
       const p = hexToPixel(h.q, h.r, BASE_HEX_RADIUS);
@@ -1884,7 +2123,8 @@ export function exportMapToPng(
           map.height,
           map.elevation,
           map.geography,
-          map.terrains
+          map.terrains,
+          map.manualCurrents
         )
       : null;
 
@@ -1893,9 +2133,15 @@ export function exportMapToPng(
       const idx = hexIndex(q, r, map.width);
       const biomeId = map.biomes[idx];
       const terrainId = getHexTerrain(map, idx);
-      const terrainMeta = getTerrainMeta(terrainId);
+      const terrainMeta = getTerrainMetaWithCustom(
+        terrainId,
+        map.customTerrains,
+        map.terrainOverrides
+      );
       const meta = getBiomeMetaWithCustom(biomeId, map.customBiomes);
-      const isWater = isWaterTerrain(terrainId) || meta.isWater;
+      const isWater =
+        isWaterTerrainWithCustom(terrainId, map.customTerrains, map.terrainOverrides) ||
+        meta.isWater;
       const temp = map.temperature[idx] ?? 15;
       const pos = hexToPixel(q, r, hexRadius);
       traceHexPath(ctx, pos.x, pos.y, hexRadius + 0.4);
@@ -1989,29 +2235,35 @@ export function exportMapToPng(
         }
         if (
           !isWater &&
-          (terrainId === TerrainId.HILLS ||
-            terrainId === TerrainId.HIGHLAND ||
-            terrainId === TerrainId.MOUNTAIN ||
-            terrainId === TerrainId.HIGH_PEAK)
+          terrainMeta.reliefStyle !== 'flat' &&
+          terrainMeta.reliefStyle !== 'water' &&
+          terrainMeta.reliefStyle !== 'lake'
         ) {
-          drawTerrainDetail(ctx, pos.x, pos.y, hexRadius, terrainId, biomeId, temp, false);
+          drawTerrainDetail(ctx, pos.x, pos.y, hexRadius, terrainMeta, biomeId, temp, false);
         }
         if (options.layers.features && map.features?.[idx]) {
           if (map.features[idx] === 'cliff') {
             drawCliffOverlay(ctx, map, q, r, pos.x, pos.y, hexRadius);
           } else {
-            drawSpecialFeature(ctx, pos.x, pos.y, hexRadius, map.features[idx]);
+            drawSpecialFeature(
+              ctx,
+              pos.x,
+              pos.y,
+              hexRadius,
+              map.features[idx],
+              map.customFeatures,
+              map.featureOverrides
+            );
           }
         }
       } else if (options.overlay === 'terrain') {
         if (
           !isWater &&
-          (terrainId === TerrainId.HILLS ||
-            terrainId === TerrainId.HIGHLAND ||
-            terrainId === TerrainId.MOUNTAIN ||
-            terrainId === TerrainId.HIGH_PEAK)
+          terrainMeta.reliefStyle !== 'flat' &&
+          terrainMeta.reliefStyle !== 'water' &&
+          terrainMeta.reliefStyle !== 'lake'
         ) {
-          drawTerrainDetail(ctx, pos.x, pos.y, hexRadius, terrainId, biomeId, 15, true);
+          drawTerrainDetail(ctx, pos.x, pos.y, hexRadius, terrainMeta, biomeId, 15, true);
         }
         if (options.layers.features && map.features?.[idx] === 'cliff') {
           drawCliffOverlay(ctx, map, q, r, pos.x, pos.y, hexRadius);
@@ -2153,6 +2405,8 @@ export function exportMapToPng(
         ? 'ศาสนา & ความเชื่อ'
         : options.overlay === 'culture'
         ? 'วัฒนธรรม & อารยธรรม'
+        : options.overlay === 'elevation'
+        ? 'ความสูง & ความลึก (ม.)'
         : options.overlay === 'currents'
         ? 'กระแสน้ำมหาสมุทร (Currents)'
         : options.overlay === 'terrain'
@@ -2165,7 +2419,27 @@ export function exportMapToPng(
     );
     ly += 22;
 
-    if (options.overlay === 'currents') {
+    if (options.overlay === 'elevation') {
+      const bands = [
+        { color: elevationColor(0.92), label: '+6,000 ถึง +8,850 ม. (ยอดเขาสูง)' },
+        { color: elevationColor(0.68), label: '+3,000 ถึง +5,200 ม. (เทือกเขา)' },
+        { color: elevationColor(0.52), label: '+1,400 ถึง +2,800 ม. (ที่ราบสูง)' },
+        { color: elevationColor(0.38), label: '+400 ถึง +1,400 ม. (เนินเขา)' },
+        { color: elevationColor(0.14), label: '0 ถึง +400 ม. (ที่ราบลุ่ม)' },
+        { color: elevationColor(-0.12), label: '-200 ถึง 0 ม. (ไหล่ทวีป/น้ำตื้น)' },
+        { color: elevationColor(-0.65), label: '-6,000 ถึง -200 ม. (ร่องลึกมหาสมุทร)' },
+      ];
+      for (const item of bands) {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(lx, ly - 10, 14, 14);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeRect(lx, ly - 10, 14, 14);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '400 11px Sarabun, sans-serif';
+        ctx.fillText(item.label, lx + 22, ly + 1);
+        ly += 20;
+      }
+    } else if (options.overlay === 'currents') {
       const items = [
         { color: '#f97316', label: 'กระแสน้ำอุ่น (Warm Current)' },
         { color: '#38bdf8', label: 'กระแสน้ำเย็น (Cold Current)' },
@@ -2215,7 +2489,7 @@ export function exportMapToPng(
         const tId = getHexTerrain(map, i);
         tCounts.set(tId, (tCounts.get(tId) ?? 0) + 1);
       }
-      for (const t of TERRAINS) {
+      for (const t of getAllTerrains(map.customTerrains, map.terrainOverrides)) {
         const cnt = tCounts.get(t.id) ?? 0;
         if (cnt === 0) continue;
         ctx.fillStyle = t.color;
@@ -2256,7 +2530,7 @@ export function exportMapToPng(
       ctx.font = '600 11px Sarabun, sans-serif';
       ctx.fillText('ภูมิประเทศ', lx, ly);
       ly += 16;
-      for (const t of TERRAINS) {
+      for (const t of getAllTerrains(map.customTerrains, map.terrainOverrides)) {
         const cnt = tCounts.get(t.id) ?? 0;
         if (cnt === 0) continue;
         ctx.fillStyle = t.color;

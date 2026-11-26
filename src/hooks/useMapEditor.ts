@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBiomeMetaWithCustom } from '../data/biomes';
-import { getFeatureMeta } from '../data/features';
+import { getFeatureMetaWithCustom } from '../data/features';
 import { CITY_TIERS } from '../data/goods';
-import { getTerrainMeta } from '../data/terrains';
+import { getTerrainMetaWithCustom } from '../data/terrains';
 import { autoDetectCliffsFromElevation, syncShallowWater } from '../engine/cliffs';
+import {
+  applySmoothTerrainElevation,
+  sculptElevationBrush,
+  SculptMode,
+} from '../engine/elevation';
 import {
   findHexPath,
   floodFillHexes,
@@ -42,6 +47,7 @@ import {
   CustomBiome,
   CustomCategoryType,
   CustomPoiType,
+  CustomTerrain,
   GeographyConfig,
   HexCoord,
   HexMapData,
@@ -51,6 +57,7 @@ import {
   PoiType,
   Religion,
   RoadType,
+  SpecialFeatureMeta,
   TerrainId,
   ToolMode,
   TradeMode,
@@ -71,7 +78,10 @@ export function useMapEditor() {
   const [redoStack, setRedoStack] = useState<HexMapData[]>([]);
 
   const [tool, setTool] = useState<ToolMode>('view');
-  const [activeTerrain, setActiveTerrain] = useState<TerrainId>(TerrainId.PLAINS);
+  const [activeTerrain, setActiveTerrain] = useState<number>(TerrainId.PLAINS);
+  const [terrainEditMode, setTerrainEditMode] = useState<'paint' | 'sculpt'>('paint');
+  const [sculptMode, setSculptMode] = useState<SculptMode>('raise');
+  const [sculptIntensity, setSculptIntensity] = useState<number>(0.08);
   const [activeBiome, setActiveBiome] = useState<number>(BiomeId.GRASSLAND);
   // null = paint biome; '' = erase special feature; non-empty = paint special feature id
   const [activeFeature, setActiveFeature] = useState<string | null>(null);
@@ -79,6 +89,9 @@ export function useMapEditor() {
   const [autoShallowWater, setAutoShallowWater] = useState<boolean>(true);
   const [terrainSubTool, setTerrainSubTool] = useState<'brush' | 'fill' | 'eyedropper'>('brush');
   const [riverSubTool, setRiverSubTool] = useState<'draw' | 'erase'>('draw');
+  const [currentSubTool, setCurrentSubTool] = useState<'draw' | 'erase'>('draw');
+  const [currentKind, setCurrentKind] = useState<'warm' | 'cold' | 'neutral'>('warm');
+  const [currentDrawStrength, setCurrentDrawStrength] = useState<number>(1.2);
   const [roadType, setRoadType] = useState<RoadType>('stone');
   const [roadSubTool, setRoadSubTool] = useState<'auto' | 'manual' | 'erase'>('auto');
   const [tradeMode, setTradeMode] = useState<TradeMode>('mixed');
@@ -191,7 +204,9 @@ export function useMapEditor() {
         // Feature painting or erasing mode
         if (activeFeature !== null) {
           const nextFeatures = [...prev.features];
-          const featMeta = activeFeature ? getFeatureMeta(activeFeature) : null;
+          const featMeta = activeFeature
+            ? getFeatureMetaWithCustom(activeFeature, prev.customFeatures, prev.featureOverrides)
+            : null;
           let changed = false;
           let cliffAffected = false;
           const changedHexes: HexCoord[] = [];
@@ -269,8 +284,12 @@ export function useMapEditor() {
           return { ...prev, features: nextFeatures };
         }
 
-        // Physical Terrain (landform / water) painting — preserves existing land biomes!
-        const tMeta = getTerrainMeta(activeTerrain);
+        // Physical Terrain (landform / water) painting — preserves existing land biomes and blends smooth elevations!
+        const tMeta = getTerrainMetaWithCustom(
+          activeTerrain,
+          prev.customTerrains,
+          prev.terrainOverrides
+        );
         const curActiveBMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
         const fallbackLandBiome =
           !curActiveBMeta.isWater &&
@@ -292,6 +311,7 @@ export function useMapEditor() {
         const nextFeat = [...prev.features];
         let changed = false;
         const changedHexes: HexCoord[] = [];
+        const changedSet = new Set<number>();
 
         for (const h of brush) {
           const idx = hexIndex(h.q, h.r, prev.width);
@@ -299,7 +319,27 @@ export function useMapEditor() {
           const curIsWater = isWaterBiome(nextBiomes[idx], prev.customBiomes);
           if (curT !== activeTerrain || curIsWater !== tMeta.isWater) {
             nextTerrains[idx] = activeTerrain;
-            nextElev[idx] = tMeta.defaultElevation;
+            const { centerElev, neighborUpdates } = applySmoothTerrainElevation(
+              nextElev,
+              nextTerrains,
+              prev.width,
+              prev.height,
+              h.q,
+              h.r,
+              activeTerrain,
+              prev.customTerrains,
+              prev.terrainOverrides
+            );
+            nextElev[idx] = centerElev;
+            for (const nu of neighborUpdates) {
+              nextElev[nu.idx] = nu.elev;
+              if (!changedSet.has(nu.idx)) {
+                changedSet.add(nu.idx);
+                const nq = nu.idx % prev.width;
+                const nr = (nu.idx - nq) / prev.width;
+                changedHexes.push({ q: nq, r: nr });
+              }
+            }
             if (tMeta.isWater) {
               nextBiomes[idx] =
                 activeTerrain === TerrainId.LAKE
@@ -314,13 +354,20 @@ export function useMapEditor() {
               nextBiomes[idx] = fallbackLandBiome;
             }
             if (nextFeat[idx]) {
-              const fm = getFeatureMeta(nextFeat[idx]);
+              const fm = getFeatureMetaWithCustom(
+                nextFeat[idx],
+                prev.customFeatures,
+                prev.featureOverrides
+              );
               if (fm && (fm.placement === 'water') !== tMeta.isWater) {
                 nextFeat[idx] = '';
               }
             }
             changed = true;
-            changedHexes.push(h);
+            if (!changedSet.has(idx)) {
+              changedSet.add(idx);
+              changedHexes.push(h);
+            }
           }
         }
         if (!changed) return prev;
@@ -429,7 +476,11 @@ export function useMapEditor() {
               nextRel[idx] = '';
               nextCult[idx] = '';
               if (nextFeat[idx]) {
-                const fm = getFeatureMeta(nextFeat[idx]);
+                const fm = getFeatureMetaWithCustom(
+                  nextFeat[idx],
+                  prev.customFeatures,
+                  prev.featureOverrides
+                );
                 if (fm && fm.placement !== 'water') nextFeat[idx] = '';
               }
             }
@@ -562,6 +613,7 @@ export function useMapEditor() {
     setMap((cur) => {
       const diff =
         (cur.terrains ?? []).some((v, i) => v !== (snap.terrains ?? [])[i]) ||
+        cur.elevation.some((v, i) => v !== snap.elevation[i]) ||
         cur.biomes.some((v, i) => v !== snap.biomes[i]) ||
         cur.features.some((v, i) => v !== snap.features[i]) ||
         cur.territories.some((v, i) => v !== snap.territories[i]) ||
@@ -575,6 +627,120 @@ export function useMapEditor() {
     });
   }, []);
 
+  const sculptElevationAt = useCallback(
+    (q: number, r: number) => {
+      setMap((prev) => {
+        const baseTerrains =
+          prev.terrains ?? prev.biomes.map((_, i) => getHexTerrain(prev, i));
+        const res = sculptElevationBrush(
+          prev.elevation,
+          baseTerrains,
+          prev.width,
+          prev.height,
+          q,
+          r,
+          brushSize - 1,
+          sculptMode,
+          sculptIntensity,
+          prev.customTerrains,
+          prev.terrainOverrides
+        );
+        if (res.changedIndices.length === 0) return prev;
+
+        const curActiveBMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
+        const fallbackLandBiome =
+          !curActiveBMeta.isWater &&
+          activeBiome !== BiomeId.HILLS &&
+          activeBiome !== BiomeId.HIGHLAND &&
+          activeBiome !== BiomeId.MOUNTAIN &&
+          activeBiome !== BiomeId.SNOW_PEAK
+            ? activeBiome
+            : BiomeId.GRASSLAND;
+
+        const nextBiomes = [...prev.biomes];
+        const nextTerr = [...prev.territories];
+        const nextRel = [...prev.religions];
+        const nextCult = [...(prev.cultures ?? new Array<string>(prev.width * prev.height).fill(''))];
+        const nextFeat = [...prev.features];
+        const changedHexes: HexCoord[] = [];
+
+        for (const idx of res.changedIndices) {
+          const hq = idx % prev.width;
+          const hr = (idx - hq) / prev.width;
+          changedHexes.push({ q: hq, r: hr });
+          const nextTMeta = getTerrainMetaWithCustom(
+            res.nextTerrains[idx],
+            prev.customTerrains,
+            prev.terrainOverrides
+          );
+          const wasWater = isWaterBiome(nextBiomes[idx], prev.customBiomes);
+          if (nextTMeta.isWater) {
+            nextBiomes[idx] =
+              res.nextTerrains[idx] === TerrainId.LAKE
+                ? BiomeId.LAKE
+                : res.nextTerrains[idx] === TerrainId.DEEP_OCEAN
+                ? BiomeId.DEEP_OCEAN
+                : BiomeId.SHALLOW_WATER;
+            nextTerr[idx] = '';
+            nextRel[idx] = '';
+            nextCult[idx] = '';
+          } else if (wasWater) {
+            nextBiomes[idx] = fallbackLandBiome;
+          }
+          if (nextFeat[idx]) {
+            const fm = getFeatureMetaWithCustom(
+              nextFeat[idx],
+              prev.customFeatures,
+              prev.featureOverrides
+            );
+            if (fm && (fm.placement === 'water') !== nextTMeta.isWater) {
+              nextFeat[idx] = '';
+            }
+          }
+        }
+
+        if (autoShallowWater) {
+          const synced = syncShallowWater(
+            {
+              width: prev.width,
+              height: prev.height,
+              terrains: res.nextTerrains,
+              biomes: nextBiomes,
+              elevation: res.nextElevation,
+              features: nextFeat,
+              customBiomes: prev.customBiomes,
+            },
+            { changedHexes }
+          );
+          markHexesDirty([...changedHexes, ...synced.changedHexes]);
+          return {
+            ...prev,
+            terrains: synced.terrains,
+            biomes: synced.biomes,
+            elevation: synced.elevation,
+            territories: nextTerr,
+            religions: nextRel,
+            cultures: nextCult,
+            features: synced.features,
+          };
+        }
+
+        markHexesDirty(changedHexes);
+        return {
+          ...prev,
+          terrains: res.nextTerrains,
+          biomes: nextBiomes,
+          elevation: res.nextElevation,
+          territories: nextTerr,
+          religions: nextRel,
+          cultures: nextCult,
+          features: nextFeat,
+        };
+      });
+    },
+    [activeBiome, autoShallowWater, brushSize, markHexesDirty, sculptIntensity, sculptMode]
+  );
+
   const floodFillAt = useCallback(
     (q: number, r: number) => {
       commitMapChange((prev) => {
@@ -582,7 +748,11 @@ export function useMapEditor() {
           prev.terrains ?? prev.biomes.map((_, i) => getHexTerrain(prev, i));
         const targets = floodFillHexes(baseTerrains, prev.width, prev.height, q, r);
         if (targets.length === 0) return prev;
-        const tMeta = getTerrainMeta(activeTerrain);
+        const tMeta = getTerrainMetaWithCustom(
+          activeTerrain,
+          prev.customTerrains,
+          prev.terrainOverrides
+        );
         const curActiveBMeta = getBiomeMetaWithCustom(activeBiome, prev.customBiomes);
         const fallbackLandBiome =
           !curActiveBMeta.isWater &&
@@ -620,7 +790,11 @@ export function useMapEditor() {
             nextBiomes[idx] = fallbackLandBiome;
           }
           if (nextFeat[idx]) {
-            const fm = getFeatureMeta(nextFeat[idx]);
+            const fm = getFeatureMetaWithCustom(
+              nextFeat[idx],
+              prev.customFeatures,
+              prev.featureOverrides
+            );
             if (fm && (fm.placement === 'water') !== tMeta.isWater) {
               nextFeat[idx] = '';
             }
@@ -718,7 +892,11 @@ export function useMapEditor() {
             nextRel[idx] = '';
             nextCult[idx] = '';
             if (nextFeat[idx]) {
-              const fm = getFeatureMeta(nextFeat[idx]);
+              const fm = getFeatureMetaWithCustom(
+                nextFeat[idx],
+                prev.customFeatures,
+                prev.featureOverrides
+              );
               if (fm && fm.placement !== 'water') nextFeat[idx] = '';
             }
           }
@@ -1187,6 +1365,16 @@ export function useMapEditor() {
     [commitMapChange, map.customBiomes]
   );
 
+  const updateCustomBiome = useCallback(
+    (id: number, patch: Partial<Omit<CustomBiome, 'id'>>) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        customBiomes: prev.customBiomes.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+      }));
+    },
+    [commitMapChange]
+  );
+
   const deleteCustomBiome = useCallback(
     (id: number) => {
       commitMapChange((prev) => ({
@@ -1197,6 +1385,157 @@ export function useMapEditor() {
       if (activeBiome === id) setActiveBiome(BiomeId.GRASSLAND);
     },
     [activeBiome, commitMapChange]
+  );
+
+  const addCustomTerrain = useCallback(
+    (terrain: Omit<CustomTerrain, 'id'>) => {
+      const maxId = (map.customTerrains ?? []).reduce((m, t) => Math.max(m, t.id), 99);
+      const newTerrain: CustomTerrain = { ...terrain, id: maxId + 1 };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customTerrains: [...(prev.customTerrains ?? []), newTerrain],
+        }),
+        []
+      );
+      setActiveTerrain(newTerrain.id);
+      setActiveFeature(null);
+      setTool('terrain');
+      return newTerrain;
+    },
+    [commitMapChange, map.customTerrains]
+  );
+
+  const updateCustomTerrain = useCallback(
+    (id: number, patch: Partial<Omit<CustomTerrain, 'id'>>) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        customTerrains: (prev.customTerrains ?? []).map((t) =>
+          t.id === id ? { ...t, ...patch } : t
+        ),
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const deleteCustomTerrain = useCallback(
+    (id: number) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        customTerrains: (prev.customTerrains ?? []).filter((t) => t.id !== id),
+        terrains: (prev.terrains ?? []).map((t) => (t === id ? TerrainId.PLAINS : t)),
+      }));
+      if (activeTerrain === id) setActiveTerrain(TerrainId.PLAINS);
+    },
+    [activeTerrain, commitMapChange]
+  );
+
+  const setTerrainOverride = useCallback(
+    (id: number, patch: Partial<Omit<CustomTerrain, 'id'>>) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        terrainOverrides: {
+          ...(prev.terrainOverrides ?? {}),
+          [id]: { ...(prev.terrainOverrides?.[id] ?? {}), ...patch },
+        },
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const resetTerrainOverride = useCallback(
+    (id: number) => {
+      commitMapChange((prev) => {
+        const next = { ...(prev.terrainOverrides ?? {}) };
+        delete next[id];
+        return { ...prev, terrainOverrides: next };
+      });
+    },
+    [commitMapChange]
+  );
+
+  const addCustomFeature = useCallback(
+    (feature: Omit<SpecialFeatureMeta, 'id'>) => {
+      const created: SpecialFeatureMeta = {
+        ...feature,
+        id: `feat_custom_${Date.now().toString(36)}`,
+        isCustom: true,
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          customFeatures: [...(prev.customFeatures ?? []), created],
+        }),
+        []
+      );
+      setActiveFeature(created.id);
+      setTool('terrain');
+      return created;
+    },
+    [commitMapChange]
+  );
+
+  const updateCustomFeature = useCallback(
+    (id: string, patch: Partial<Omit<SpecialFeatureMeta, 'id'>>) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        customFeatures: (prev.customFeatures ?? []).map((f) =>
+          f.id === id ? { ...f, ...patch } : f
+        ),
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const deleteCustomFeature = useCallback(
+    (id: string) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        customFeatures: (prev.customFeatures ?? []).filter((f) => f.id !== id),
+        features: prev.features.map((f) => (f === id ? '' : f)),
+      }));
+      if (activeFeature === id) setActiveFeature(null);
+    },
+    [activeFeature, commitMapChange]
+  );
+
+  const setFeatureOverride = useCallback(
+    (id: string, patch: Partial<Omit<SpecialFeatureMeta, 'id'>>) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        featureOverrides: {
+          ...(prev.featureOverrides ?? {}),
+          [id]: { ...(prev.featureOverrides?.[id] ?? {}), ...patch },
+        },
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const resetFeatureOverride = useCallback(
+    (id: string) => {
+      commitMapChange((prev) => {
+        const next = { ...(prev.featureOverrides ?? {}) };
+        delete next[id];
+        return { ...prev, featureOverrides: next };
+      });
+    },
+    [commitMapChange]
+  );
+
+  const eraseCurrentNear = useCallback(
+    (q: number, r: number) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          manualCurrents: (prev.manualCurrents ?? []).filter(
+            (mc) => !mc.points.some((p) => hexDistance(p, { q, r }) <= 1)
+          ),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
   );
 
   const addCustomPoiType = useCallback(
@@ -1408,6 +1747,12 @@ export function useMapEditor() {
     setTool,
     activeTerrain,
     setActiveTerrain,
+    terrainEditMode,
+    setTerrainEditMode,
+    sculptMode,
+    setSculptMode,
+    sculptIntensity,
+    setSculptIntensity,
     activeBiome,
     setActiveBiome,
     activeFeature,
@@ -1420,6 +1765,12 @@ export function useMapEditor() {
     setTerrainSubTool,
     riverSubTool,
     setRiverSubTool,
+    currentSubTool,
+    setCurrentSubTool,
+    currentKind,
+    setCurrentKind,
+    currentDrawStrength,
+    setCurrentDrawStrength,
     roadType,
     setRoadType,
     roadSubTool,
@@ -1466,6 +1817,7 @@ export function useMapEditor() {
     markAllDirty,
     beginStroke,
     paintTerrainAt,
+    sculptElevationAt,
     paintBiomeAt,
     paintTerritoryAt,
     paintReligionAt,
@@ -1496,7 +1848,19 @@ export function useMapEditor() {
     loadImportedMap,
     clearMapEdits,
     addCustomBiome,
+    updateCustomBiome,
     deleteCustomBiome,
+    addCustomTerrain,
+    updateCustomTerrain,
+    deleteCustomTerrain,
+    setTerrainOverride,
+    resetTerrainOverride,
+    addCustomFeature,
+    updateCustomFeature,
+    deleteCustomFeature,
+    setFeatureOverride,
+    resetFeatureOverride,
+    eraseCurrentNear,
     addCustomPoiType,
     deleteCustomPoiType,
     eraseRoadNear,

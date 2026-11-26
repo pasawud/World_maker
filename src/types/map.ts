@@ -45,6 +45,35 @@ export type BiomeDetailStyle =
   | 'mushroom'
   | 'ruins_floor';
 
+export type TerrainReliefStyle =
+  | 'flat'
+  | 'hills'
+  | 'highland'
+  | 'mountain'
+  | 'peak'
+  | 'water'
+  | 'lake'
+  | 'crater'
+  | 'canyon'
+  | 'volcano'
+  | 'plateau'
+  | 'ice_shelf';
+
+export interface CustomTerrain {
+  id: number; // >= 100
+  key?: string;
+  nameTh: string;
+  nameEn?: string;
+  color: string;
+  isWater: boolean;
+  defaultElevation: number;
+  minElevation?: number;
+  maxElevation?: number;
+  moveCost: number;
+  reliefStyle: TerrainReliefStyle;
+  description?: string;
+}
+
 export interface CustomBiome {
   id: number; // >= 100
   nameTh: string;
@@ -54,6 +83,8 @@ export interface CustomBiome {
   defaultElevation: number;
   moveCost: number;
   detailStyle: BiomeDetailStyle;
+  goodsBonus?: string[];
+  description?: string;
 }
 
 export interface CustomPoiType {
@@ -64,13 +95,39 @@ export interface CustomPoiType {
   isCustom?: boolean;
 }
 
+export type FeatureVisualStyle =
+  | 'default'
+  | 'volcano'
+  | 'oasis'
+  | 'ruins'
+  | 'crystal'
+  | 'reef'
+  | 'whirlpool'
+  | 'geothermal'
+  | 'mesa'
+  | 'waterfall'
+  | 'custom';
+
 export interface SpecialFeatureMeta {
   id: string;
   nameTh: string;
+  nameEn?: string;
   color: string;
   placement: 'land' | 'water' | 'coast' | 'any';
   moveCostDelta: number;
   goodsBonus: string[];
+  symbol?: string;
+  visualStyle?: FeatureVisualStyle;
+  description?: string;
+  isCustom?: boolean;
+}
+
+export interface ManualCurrentPath {
+  id: string;
+  name?: string;
+  kind: 'warm' | 'cold' | 'neutral';
+  strength: number; // 0.3 .. 2.0
+  points: HexCoord[];
 }
 
 export interface CustomCategoryType {
@@ -188,6 +245,8 @@ export interface GeographyConfig {
   moistureScale: number;
   riverThreshold: number;
   oceanCurrents?: boolean;
+  currentStrength?: number; // 0.2 .. 2.0, default 1.0
+  coriolisDirection?: 'normal' | 'reversed';
 }
 
 export interface HexCoord {
@@ -482,6 +541,11 @@ export interface HexMapData {
   cultureList: Culture[];
   goods: TradeGood[];
   customBiomes: CustomBiome[];
+  customTerrains?: CustomTerrain[];
+  customFeatures?: SpecialFeatureMeta[];
+  terrainOverrides?: Record<number, Partial<Omit<CustomTerrain, 'id'>>>;
+  featureOverrides?: Record<string, Partial<Omit<SpecialFeatureMeta, 'id'>>>;
+  manualCurrents?: ManualCurrentPath[];
   customPoiTypes: CustomPoiType[];
   customGovernmentTypes?: CustomCategoryType[];
   customReligionTypes?: CustomCategoryType[];
@@ -498,6 +562,7 @@ export type ToolMode =
   | 'terrain'
   | 'biome'
   | 'river'
+  | 'current'
   | 'city'
   | 'territory'
   | 'religion'

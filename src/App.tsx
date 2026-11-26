@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CityBlueprintModal } from './components/CityBlueprintModal';
 import { CityTradeModal } from './components/CityTradeModal';
-import { CustomAssetsModal } from './components/CustomAssetsModal';
+import { CustomAssetsModal, CustomStudioTab } from './components/CustomAssetsModal';
 import { EconomyModal } from './components/EconomyModal';
 import { EntityLoreModal } from './components/EntityLoreModal';
 import { ExportImportModal } from './components/ExportImportModal';
@@ -23,7 +23,7 @@ export function App() {
   const editor = useMapEditor();
   const [showSizeModal, setShowSizeModal] = useState(false);
   const [showEconomyModal, setShowEconomyModal] = useState(false);
-  const [customModalTab, setCustomModalTab] = useState<'biomes' | 'pois' | null>(null);
+  const [customModalTab, setCustomModalTab] = useState<CustomStudioTab | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [tradeModalCityId, setTradeModalCityId] = useState<string | null>(null);
   const [blueprintCityId, setBlueprintCityId] = useState<string | null>(null);
@@ -66,6 +66,10 @@ export function App() {
       }
       if (e.key.toLowerCase() === 'b') {
         editor.setTool('biome');
+        return;
+      }
+      if (e.key.toLowerCase() === 'c') {
+        editor.setTool('current');
         return;
       }
       if (e.key === 'Escape') {
@@ -157,7 +161,7 @@ export function App() {
         }}
         onOpenSizeModal={() => setShowSizeModal(true)}
         onOpenEconomyModal={() => setShowEconomyModal(true)}
-        onOpenCustomModal={() => setCustomModalTab('biomes')}
+        onOpenCustomModal={() => setCustomModalTab('terrains')}
         onOpenExportModal={() => setShowExportModal(true)}
       />
 
@@ -168,6 +172,13 @@ export function App() {
           tool={editor.tool}
           activeTerrain={editor.activeTerrain}
           onSelectTerrain={editor.setActiveTerrain}
+          terrainEditMode={editor.terrainEditMode}
+          onChangeTerrainEditMode={editor.setTerrainEditMode}
+          sculptMode={editor.sculptMode}
+          onChangeSculptMode={editor.setSculptMode}
+          sculptIntensity={editor.sculptIntensity}
+          onChangeSculptIntensity={editor.setSculptIntensity}
+          onSculptElevationAt={editor.sculptElevationAt}
           activeBiome={editor.activeBiome}
           onSelectBiome={editor.setActiveBiome}
           activeFeature={editor.activeFeature}
@@ -189,6 +200,34 @@ export function App() {
           onChangeTerrainSubTool={editor.setTerrainSubTool}
           riverSubTool={editor.riverSubTool}
           onChangeRiverSubTool={editor.setRiverSubTool}
+          currentSubTool={editor.currentSubTool}
+          onChangeCurrentSubTool={editor.setCurrentSubTool}
+          currentKind={editor.currentKind}
+          onChangeCurrentKind={editor.setCurrentKind}
+          currentDrawStrength={editor.currentDrawStrength}
+          onChangeCurrentDrawStrength={editor.setCurrentDrawStrength}
+          onAddManualCurrent={(points) => {
+            editor.commitMapChange(
+              (prev) => ({
+                ...prev,
+                manualCurrents: [
+                  ...(prev.manualCurrents ?? []),
+                  {
+                    id: `cur_${Date.now().toString(36)}`,
+                    kind: editor.currentKind,
+                    strength: editor.currentDrawStrength,
+                    points,
+                  },
+                ],
+              }),
+              []
+            );
+            showToast('เพิ่มสายกระแสน้ำมหาสมุทรแล้ว');
+          }}
+          onEraseCurrentNear={(q, r) => {
+            editor.eraseCurrentNear(q, r);
+            showToast('ลบสายกระแสน้ำแล้ว');
+          }}
           roadType={editor.roadType}
           onChangeRoadType={editor.setRoadType}
           roadSubTool={editor.roadSubTool}
@@ -344,6 +383,30 @@ export function App() {
             editor.setActiveTerrain(t);
             if (editor.tool !== 'terrain') editor.setTool('terrain');
           }}
+          terrainEditMode={editor.terrainEditMode}
+          onChangeTerrainEditMode={editor.setTerrainEditMode}
+          currentKind={editor.currentKind}
+          onChangeCurrentKind={editor.setCurrentKind}
+          currentDrawStrength={editor.currentDrawStrength}
+          onChangeCurrentDrawStrength={editor.setCurrentDrawStrength}
+          onUpdateGeography={(patch) =>
+            editor.commitMapChange(
+              (prev) => ({
+                ...prev,
+                geography: { ...prev.geography, ...patch },
+              }),
+              []
+            )
+          }
+          onDeleteManualCurrent={(id) =>
+            editor.commitMapChange(
+              (prev) => ({
+                ...prev,
+                manualCurrents: (prev.manualCurrents ?? []).filter((c) => c.id !== id),
+              }),
+              []
+            )
+          }
           activeBiome={editor.activeBiome}
           onSelectBiome={(b) => {
             editor.setActiveBiome(b);
@@ -557,14 +620,36 @@ export function App() {
 
       {customModalTab && (
         <CustomAssetsModal
+          customTerrains={editor.map.customTerrains ?? []}
           customBiomes={editor.map.customBiomes}
+          customFeatures={editor.map.customFeatures ?? []}
+          terrainOverrides={editor.map.terrainOverrides ?? {}}
+          featureOverrides={editor.map.featureOverrides ?? {}}
           customPoiTypes={editor.map.customPoiTypes}
+          goods={editor.map.goods}
           initialTab={customModalTab}
+          onAddTerrain={(t) => {
+            const created = editor.addCustomTerrain(t);
+            showToast(`เพิ่มภูมิประเทศ "${created.nameTh}" และเลือกใช้งานแล้ว`);
+          }}
+          onUpdateTerrain={editor.updateCustomTerrain}
+          onDeleteTerrain={editor.deleteCustomTerrain}
+          onSetTerrainOverride={editor.setTerrainOverride}
+          onResetTerrainOverride={editor.resetTerrainOverride}
           onAddBiome={(b) => {
             const created = editor.addCustomBiome(b);
             showToast(`เพิ่มไบโอม "${created.nameTh}" และเลือกใช้งานแล้ว`);
           }}
+          onUpdateBiome={editor.updateCustomBiome}
           onDeleteBiome={editor.deleteCustomBiome}
+          onAddFeature={(f) => {
+            const created = editor.addCustomFeature(f);
+            showToast(`เพิ่มลักษณะพิเศษ "${created.nameTh}" และเลือกใช้งานแล้ว`);
+          }}
+          onUpdateFeature={editor.updateCustomFeature}
+          onDeleteFeature={editor.deleteCustomFeature}
+          onSetFeatureOverride={editor.setFeatureOverride}
+          onResetFeatureOverride={editor.resetFeatureOverride}
           onAddPoiType={(p) => {
             const created = editor.addCustomPoiType(p);
             showToast(`เพิ่มจุดสำคัญ "${created.label}" และเลือกใช้งานแล้ว`);

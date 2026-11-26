@@ -1,11 +1,13 @@
+import { getBiomeMetaWithCustom } from '../data/biomes';
 import { DEFAULT_CULTURES, DEFAULT_GOODS, DEFAULT_KINGDOMS, DEFAULT_RELIGIONS } from '../data/goods';
-import { getFeatureMeta } from '../data/features';
-import { getTerrainMeta, isWaterTerrain } from '../data/terrains';
+import { getFeatureMetaWithCustom } from '../data/features';
+import { isWaterTerrain, isWaterTerrainWithCustom } from '../data/terrains';
 import {
   BiomeId,
   City,
   GeographyConfig,
   HexMapData,
+  ManualCurrentPath,
   RiverPath,
   TerrainId,
   TradeRoute,
@@ -13,6 +15,7 @@ import {
 } from '../types/map';
 import { generateNaturalCliffs, syncShallowWater } from './cliffs';
 import { computeCoastalCurrentInfluence, computeOceanCurrents } from './currents';
+import { getElevationBandForTerrain } from './elevation';
 import {
   findHexPath,
   getHexBrush,
@@ -43,6 +46,8 @@ export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   moistureScale: 1.0,
   riverThreshold: 20,
   oceanCurrents: true,
+  currentStrength: 1.0,
+  coriolisDirection: 'normal',
 };
 
 /** Compute latitude in degrees for row r between latNorth (top) and latSouth (bottom). */
@@ -231,15 +236,16 @@ export function simulateClimate(
   width: number,
   height: number,
   config: GeographyConfig,
-  terrains?: ArrayLike<number>
+  terrains?: ArrayLike<number>,
+  manualCurrents?: ManualCurrentPath[]
 ): { temperature: number[]; moisture: number[] } {
   const total = width * height;
   const temperature = new Array<number>(total);
   const moisture = new Array<number>(total).fill(0);
 
-  const useCurrents = config.oceanCurrents !== false;
+  const useCurrents = config.oceanCurrents !== false || Boolean(manualCurrents?.length);
   const currents = useCurrents
-    ? computeOceanCurrents(width, height, elevation, config, terrains)
+    ? computeOceanCurrents(width, height, elevation, config, terrains, manualCurrents)
     : null;
   const coastalThermal =
     useCurrents && currents
@@ -586,6 +592,8 @@ export function autoSuggestGoodsForCity(
   map: Pick<HexMapData, 'width' | 'height' | 'biomes' | 'rivers' | 'features'> & {
     terrains?: number[];
     customBiomes?: HexMapData['customBiomes'];
+    customFeatures?: HexMapData['customFeatures'];
+    featureOverrides?: HexMapData['featureOverrides'];
   },
   q: number,
   r: number
@@ -602,8 +610,14 @@ export function autoSuggestGoodsForCity(
     terrainCounts.set(t, (terrainCounts.get(t) ?? 0) + 1);
     const fId = map.features?.[idx];
     if (fId) {
-      const fMeta = getFeatureMeta(fId);
+      const fMeta = getFeatureMetaWithCustom(fId, map.customFeatures, map.featureOverrides);
       if (fMeta) featureBonuses.push(...fMeta.goodsBonus);
+    }
+    if (b >= 100) {
+      const cb = map.customBiomes?.find((c) => c.id === b);
+      if (cb?.goodsBonus && cb.goodsBonus.length > 0) {
+        featureBonuses.push(...cb.goodsBonus);
+      }
     }
   }
 
@@ -894,16 +908,28 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
     const t = getHexTerrain(map, i);
     baseTerrains[i] = t;
     const b = biomes[i];
-    if (t === TerrainId.PLAINS && b !== BiomeId.SWAMP) {
-      elev[i] = Math.max(0.1, Math.min(0.32, map.elevation[i] ?? 0.14));
-    } else if (t === TerrainId.PLAINS && b === BiomeId.SWAMP) {
+    const band = getElevationBandForTerrain(t, map.customTerrains, map.terrainOverrides);
+    const curE = map.elevation[i];
+    if (t === TerrainId.PLAINS && b === BiomeId.SWAMP) {
       elev[i] = 0.04;
+    } else if (Number.isFinite(curE) && curE >= band.minE && curE <= band.maxE) {
+      // Preserve continuous elevation values within the terrain's realistic band
+      elev[i] = curE;
+    } else if (Number.isFinite(curE)) {
+      elev[i] = Math.max(band.minE, Math.min(band.maxE, curE));
     } else {
-      elev[i] = getTerrainMeta(t).defaultElevation;
+      elev[i] = band.targetE;
     }
   }
 
-  const { temperature, moisture } = simulateClimate(elev, width, height, geography, baseTerrains);
+  const { temperature, moisture } = simulateClimate(
+    elev,
+    width,
+    height,
+    geography,
+    baseTerrains,
+    map.manualCurrents
+  );
   const hydro = generateRiversAuto(
     { width, height, terrains: baseTerrains, biomes, elevation: elev, moisture, geography },
     { useCurrentBiomes: false }
@@ -919,15 +945,20 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
     baseTerrains
   );
 
-  // Preserve water, lakes, and custom biomes (>=100), while updating climate biomes across all land terrains
+  // Preserve water, lakes, and custom biomes/terrains (>=100), while updating climate biomes across all land terrains
   for (let i = 0; i < total; i++) {
     const b = biomes[i];
+    const bMeta = getBiomeMetaWithCustom(b, map.customBiomes);
+    const isTWater = isWaterTerrainWithCustom(
+      baseTerrains[i],
+      map.customTerrains,
+      map.terrainOverrides
+    );
     if (
       b >= 100 ||
-      b === BiomeId.DEEP_OCEAN ||
-      b === BiomeId.SHALLOW_WATER ||
-      b === BiomeId.LAKE ||
-      baseTerrains[i] === TerrainId.LAKE
+      bMeta.isWater ||
+      baseTerrains[i] === TerrainId.LAKE ||
+      isTWater
     ) {
       nextBiomes[i] = baseTerrains[i] === TerrainId.LAKE ? BiomeId.LAKE : b;
     }

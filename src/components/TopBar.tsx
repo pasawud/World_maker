@@ -19,6 +19,7 @@ import {
   Trees,
   Undo2,
   Waves,
+  Wind,
 } from 'lucide-react';
 import { HexMapData, ToolMode } from '../types/map';
 
@@ -39,20 +40,32 @@ interface TopBarProps {
   onQuickGenerateWorld: () => void;
 }
 
-const TOOL_ITEMS: { id: ToolMode; label: string; icon: React.ReactNode; shortcut: string }[] = [
-  { id: 'view', label: 'ดูแผนที่', icon: <MousePointer2 className="w-3.5 h-3.5" />, shortcut: '1' },
-  { id: 'terrain', label: 'ภูมิประเทศ', icon: <Mountain className="w-3.5 h-3.5" />, shortcut: '2' },
-  { id: 'biome', label: 'ไบโอม', icon: <Trees className="w-3.5 h-3.5" />, shortcut: 'B' },
-  { id: 'river', label: 'วาดแม่น้ำ', icon: <Waves className="w-3.5 h-3.5" />, shortcut: '3' },
-  { id: 'city', label: 'วางเมือง', icon: <Building2 className="w-3.5 h-3.5" />, shortcut: '4' },
-  { id: 'territory', label: 'ดินแดน', icon: <Crown className="w-3.5 h-3.5" />, shortcut: '5' },
-  { id: 'religion', label: 'ศาสนา', icon: <Flame className="w-3.5 h-3.5" />, shortcut: '6' },
-  { id: 'culture', label: 'วัฒนธรรม', icon: <Landmark className="w-3.5 h-3.5" />, shortcut: '' },
-  { id: 'road', label: 'ถนน / เดินเรือ', icon: <Route className="w-3.5 h-3.5" />, shortcut: '7' },
-  { id: 'trade', label: 'การค้า', icon: <Store className="w-3.5 h-3.5" />, shortcut: '8' },
-  { id: 'measure', label: 'วัดระยะ', icon: <Ruler className="w-3.5 h-3.5" />, shortcut: '9' },
-  { id: 'poi', label: 'จุดสำคัญ', icon: <MapPin className="w-3.5 h-3.5" />, shortcut: '0' },
-  { id: 'climate', label: 'ภูมิอากาศ', icon: <CloudSun className="w-3.5 h-3.5" />, shortcut: '' },
+const TOOL_GROUPS: {
+  id: ToolMode;
+  label: string;
+  icon: React.ReactNode;
+  shortcut: string;
+}[][] = [
+  [
+    { id: 'view', label: 'ดูแผนที่', icon: <MousePointer2 className="w-3.5 h-3.5" />, shortcut: '1' },
+    { id: 'terrain', label: 'ภูมิประเทศ', icon: <Mountain className="w-3.5 h-3.5" />, shortcut: '2' },
+    { id: 'biome', label: 'ไบโอม', icon: <Trees className="w-3.5 h-3.5" />, shortcut: 'B' },
+    { id: 'river', label: 'วาดแม่น้ำ', icon: <Waves className="w-3.5 h-3.5" />, shortcut: '3' },
+    { id: 'current', label: 'กระแสน้ำ', icon: <Wind className="w-3.5 h-3.5" />, shortcut: 'C' },
+    { id: 'climate', label: 'ภูมิอากาศ', icon: <CloudSun className="w-3.5 h-3.5" />, shortcut: '' },
+  ],
+  [
+    { id: 'city', label: 'วางเมือง', icon: <Building2 className="w-3.5 h-3.5" />, shortcut: '4' },
+    { id: 'territory', label: 'ดินแดน', icon: <Crown className="w-3.5 h-3.5" />, shortcut: '5' },
+    { id: 'religion', label: 'ศาสนา', icon: <Flame className="w-3.5 h-3.5" />, shortcut: '6' },
+    { id: 'culture', label: 'วัฒนธรรม', icon: <Landmark className="w-3.5 h-3.5" />, shortcut: '' },
+  ],
+  [
+    { id: 'road', label: 'ถนน / เดินเรือ', icon: <Route className="w-3.5 h-3.5" />, shortcut: '7' },
+    { id: 'trade', label: 'การค้า', icon: <Store className="w-3.5 h-3.5" />, shortcut: '8' },
+    { id: 'measure', label: 'วัดระยะ', icon: <Ruler className="w-3.5 h-3.5" />, shortcut: '9' },
+    { id: 'poi', label: 'จุดสำคัญ', icon: <MapPin className="w-3.5 h-3.5" />, shortcut: '0' },
+  ],
 ];
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -129,26 +142,33 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
       </div>
 
-      {/* Center: Tool Mode Switcher */}
+      {/* Center: Grouped Tool Mode Switcher */}
       <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
-        {TOOL_ITEMS.map((item) => {
-          const active = tool === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onSelectTool(item.id)}
-              title={item.shortcut ? `${item.label} (คีย์ลัด ${item.shortcut})` : item.label}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition cursor-pointer ${
-                active
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(217,155,56,0.18)]'
-                  : 'bg-[#17202b] text-slate-300 hover:bg-[#202c3b] border border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
+        {TOOL_GROUPS.map((group, gIdx) => (
+          <React.Fragment key={gIdx}>
+            {gIdx > 0 && <div className="h-5 w-px bg-slate-800/90 mx-0.5 shrink-0" />}
+            <div className="flex items-center gap-0.5 bg-[#0d131b]/70 border border-slate-800/70 rounded-md p-0.5">
+              {group.map((item) => {
+                const active = tool === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onSelectTool(item.id)}
+                    title={item.shortcut ? `${item.label} (คีย์ลัด ${item.shortcut})` : item.label}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition cursor-pointer ${
+                      active
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(217,155,56,0.18)]'
+                        : 'text-slate-300 hover:bg-[#1e2938] border border-transparent hover:border-slate-700/70'
+                    }`}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </React.Fragment>
+        ))}
 
         <div className="h-5 w-px bg-slate-800 mx-0.5 shrink-0" />
 

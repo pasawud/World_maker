@@ -150,7 +150,7 @@ export function parseMapFromJson(raw: string): HexMapData {
   if (Array.isArray(obj.terrains) && obj.terrains.length === expectedLen) {
     terrains = obj.terrains.map((t) => {
       const n = Number(t);
-      return Number.isInteger(n) && n >= TerrainId.DEEP_OCEAN && n <= TerrainId.LAKE
+      return Number.isInteger(n) && ((n >= TerrainId.DEEP_OCEAN && n <= TerrainId.LAKE) || n >= 100)
         ? n
         : TerrainId.DEEP_OCEAN;
     });
@@ -249,6 +249,10 @@ export function parseMapFromJson(raw: string): HexMapData {
       moistureScale: Number(geoRaw.moistureScale) || 1,
       riverThreshold: Number(geoRaw.riverThreshold) || 20,
       oceanCurrents: geoRaw.oceanCurrents !== false,
+      currentStrength: Number.isFinite(Number(geoRaw.currentStrength))
+        ? Math.max(0.2, Math.min(2.0, Number(geoRaw.currentStrength)))
+        : 1.0,
+      coriolisDirection: geoRaw.coriolisDirection === 'reversed' ? 'reversed' : 'normal',
     },
     terrains,
     biomes,
@@ -269,6 +273,23 @@ export function parseMapFromJson(raw: string): HexMapData {
         ? (obj.goods as HexMapData['goods'])
         : DEFAULT_GOODS.map((g) => ({ ...g })),
     customBiomes,
+    customTerrains: Array.isArray(obj.customTerrains)
+      ? (obj.customTerrains as HexMapData['customTerrains'])
+      : [],
+    customFeatures: Array.isArray(obj.customFeatures)
+      ? (obj.customFeatures as HexMapData['customFeatures'])
+      : [],
+    terrainOverrides:
+      obj.terrainOverrides && typeof obj.terrainOverrides === 'object'
+        ? (obj.terrainOverrides as HexMapData['terrainOverrides'])
+        : {},
+    featureOverrides:
+      obj.featureOverrides && typeof obj.featureOverrides === 'object'
+        ? (obj.featureOverrides as HexMapData['featureOverrides'])
+        : {},
+    manualCurrents: Array.isArray(obj.manualCurrents)
+      ? (obj.manualCurrents as HexMapData['manualCurrents'])
+      : [],
     customPoiTypes,
     customGovernmentTypes: Array.isArray(obj.customGovernmentTypes)
       ? (obj.customGovernmentTypes as CustomCategoryType[])
@@ -327,6 +348,11 @@ export function resizeMap(
       religionList: map.religionList,
       cultureList: map.cultureList,
       customBiomes: map.customBiomes,
+      customTerrains: map.customTerrains ?? [],
+      customFeatures: map.customFeatures ?? [],
+      terrainOverrides: map.terrainOverrides ?? {},
+      featureOverrides: map.featureOverrides ?? {},
+      manualCurrents: [],
       customPoiTypes: map.customPoiTypes,
       customGovernmentTypes: map.customGovernmentTypes ?? [],
       customReligionTypes: map.customReligionTypes ?? [],
@@ -382,6 +408,12 @@ export function resizeMap(
     .filter((rd) => rd.hexes.length >= 2);
   const pois = map.pois.filter((p) => inNewBounds(p.q, p.r));
   const labels = map.labels.filter((l) => inNewBounds(l.q, l.r));
+  const manualCurrents = (map.manualCurrents ?? [])
+    .map((cur) => ({
+      ...cur,
+      points: cur.points.filter((p) => inNewBounds(p.q, p.r)),
+    }))
+    .filter((cur) => cur.points.length >= 2);
 
   const nextMap: HexMapData = {
     ...map,
@@ -399,6 +431,7 @@ export function resizeMap(
     religions,
     cultures,
     rivers,
+    manualCurrents,
     cities,
     roads,
     pois,
