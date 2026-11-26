@@ -456,6 +456,8 @@ export interface PointOfInterest {
   notes: string;
 }
 
+export type MapTheme = 'standard' | 'parchment' | 'atlas' | 'dark';
+
 export type LabelSize = 'sm' | 'md' | 'lg';
 export type LabelStyle = 'region' | 'water' | 'mountain';
 
@@ -466,6 +468,71 @@ export interface MapLabel {
   r: number;
   size: LabelSize;
   style: LabelStyle;
+  rotationDeg?: number;
+  curveAmount?: number; // -1..1 arc curvature
+  letterSpacing?: number;
+}
+
+export type DiplomaticRelationType =
+  | 'ally'
+  | 'trade'
+  | 'neutral'
+  | 'rival'
+  | 'war'
+  | 'vassal';
+
+export interface DiplomaticRelation {
+  id: string;
+  kingdomA: string;
+  kingdomB: string;
+  status: DiplomaticRelationType;
+  notes?: string;
+}
+
+export interface MilitaryCampaign {
+  id: string;
+  name: string;
+  kingdomId: string;
+  targetKingdomId?: string;
+  status: 'planned' | 'active' | 'victory' | 'defeat';
+  year?: number;
+  points: HexCoord[];
+  battles?: { q: number; r: number; name: string }[];
+}
+
+export type WikiCategory =
+  | 'character'
+  | 'faction'
+  | 'species'
+  | 'legend'
+  | 'history'
+  | 'artifact'
+  | 'location';
+
+export interface WikiEntry {
+  id: string;
+  title: string;
+  category: WikiCategory;
+  summary: string;
+  content: string;
+  tags: string[];
+  linkedCoord?: HexCoord;
+  linkedKingdomId?: string;
+  updatedAt: string;
+}
+
+export interface CameraBookmark {
+  id: string;
+  name: string;
+  q: number;
+  r: number;
+  zoom: number;
+}
+
+export interface ReferenceOverlayConfig {
+  imageDataUrl: string;
+  opacity: number;
+  visible: boolean;
 }
 
 export type RleStringRuns = [string, number][];
@@ -551,6 +618,11 @@ export interface HexMapData {
   customReligionTypes?: CustomCategoryType[];
   customCultureTypes?: CustomCategoryType[];
   timeline?: WorldTimeline;
+  mapTheme?: MapTheme;
+  diplomacy?: DiplomaticRelation[];
+  campaigns?: MilitaryCampaign[];
+  wikiEntries?: WikiEntry[];
+  bookmarks?: CameraBookmark[];
   roads: RoadPath[];
   tradeRoutes: TradeRoute[];
   pois: PointOfInterest[];
@@ -567,6 +639,7 @@ export type ToolMode =
   | 'territory'
   | 'religion'
   | 'culture'
+  | 'campaign'
   | 'road'
   | 'trade'
   | 'measure'
@@ -589,6 +662,9 @@ export interface LayerVisibility {
   grid: boolean;
   graticule?: boolean;
   currents?: boolean;
+  hillshade?: boolean;
+  contours?: boolean;
+  campaigns?: boolean;
   cityNames: boolean;
   labels: boolean;
   territories: boolean;

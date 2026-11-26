@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Download, FolderOpen, Save, Trash2, Upload, X } from 'lucide-react';
+import { Camera, Download, FileText, FolderOpen, Save, Trash2, Upload, X } from 'lucide-react';
 import { exportMapToPng } from '../engine/renderer';
+import { exportLorebookHtml, exportLorebookMarkdown } from '../engine/worldbuilding';
 import {
   deleteMapFromLibrary,
   listSavedMaps,
@@ -67,6 +68,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
       layers,
       includeLegend,
       includeScale,
+      mapTheme: map.mapTheme ?? 'standard',
     });
     const a = document.createElement('a');
     a.href = dataUrl;
@@ -144,6 +146,49 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                   <Download className="w-4 h-4" />
                   ดาวน์โหลดไฟล์ JSON
                 </button>
+              </div>
+
+              <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3 space-y-2">
+                <div className="font-semibold text-slate-200">ส่งออกหนังสือโลก (World Lorebook)</div>
+                <p className="text-[11px] text-slate-400">
+                  รวมข้อมูลอาณาจักร การทูต เมือง ศาสนา วัฒนธรรม ยุทธการ และบทความ Wiki เป็นเอกสารอ่าน/พิมพ์ได้
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      const md = exportLorebookMarkdown(map);
+                      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${map.name.replace(/\s+/g, '_')}_Lorebook.md`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      setNotice('ส่งออก Lorebook Markdown เรียบร้อยแล้ว');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1e2938] hover:bg-[#273548] border border-slate-600 text-emerald-300 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Lorebook (.md)
+                  </button>
+                  <button
+                    onClick={() => {
+                      const html = exportLorebookHtml(map);
+                      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${map.name.replace(/\s+/g, '_')}_Lorebook.html`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      setNotice('ส่งออก Lorebook HTML เรียบร้อยแล้ว');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1e2938] hover:bg-[#273548] border border-slate-600 text-amber-300 cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Lorebook (.html)
+                  </button>
+                </div>
               </div>
 
               <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3 space-y-2">

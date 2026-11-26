@@ -19,6 +19,8 @@ import {
   HexCoord,
   HexMapData,
   LayerVisibility,
+  MapLabel,
+  MapTheme,
   SpecialFeatureMeta,
   TerrainId,
   ToolMode,
@@ -68,6 +70,147 @@ function mixRgb(a: [number, number, number], b: [number, number, number], t: num
   const g = Math.round(a[1] + (b[1] - a[1]) * cl);
   const bl = Math.round(a[2] + (b[2] - a[2]) * cl);
   return `rgb(${r},${g},${bl})`;
+}
+
+function mixRgbTuple(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): [number, number, number] {
+  const cl = Math.max(0, Math.min(1, t));
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * cl),
+    Math.round(a[1] + (b[1] - a[1]) * cl),
+    Math.round(a[2] + (b[2] - a[2]) * cl),
+  ];
+}
+
+function applyThemeColor(
+  rgb: [number, number, number],
+  theme: MapTheme,
+  isWater: boolean,
+  terrainId: number
+): [number, number, number] {
+  if (theme === 'parchment') {
+    if (isWater) {
+      if (terrainId === TerrainId.LAKE) return [169, 178, 152];
+      if (terrainId === TerrainId.SHALLOW_WATER) return [205, 194, 162];
+      return [188, 176, 144];
+    }
+    const lum = Math.round(rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114);
+    const muted = mixRgbTuple(rgb, [lum, Math.round(lum * 0.94), Math.round(lum * 0.8)], 0.55);
+    return mixRgbTuple(muted, [218, 200, 162], 0.52);
+  }
+  if (theme === 'atlas') {
+    if (isWater) {
+      if (terrainId === TerrainId.LAKE) return [72, 168, 224];
+      return terrainId === TerrainId.SHALLOW_WATER ? [68, 146, 204] : [32, 92, 148];
+    }
+    return mixRgbTuple(rgb, [242, 240, 226], 0.14);
+  }
+  if (theme === 'dark') {
+    return mixRgbTuple(rgb, [14, 20, 32], isWater ? 0.42 : 0.3);
+  }
+  return rgb;
+}
+
+function computeHillshadeDelta(
+  elevation: ArrayLike<number>,
+  width: number,
+  height: number,
+  q: number,
+  r: number
+): number {
+  const sample = (sq: number, sr: number, fallback: number) => {
+    const cq = Math.max(0, Math.min(width - 1, sq));
+    const cr = Math.max(0, Math.min(height - 1, sr));
+    const v = elevation[hexIndex(cq, cr, width)];
+    return Number.isFinite(v) ? v : fallback;
+  };
+  const center = sample(q, r, 0);
+  const nw = sample(q - 1, r - 1, center);
+  const w = sample(q - 1, r, center);
+  const n = sample(q, r - 1, center);
+  const se = sample(q + 1, r + 1, center);
+  const e = sample(q + 1, r, center);
+  const s = sample(q, r + 1, center);
+  const grad = (nw + w + n - (se + e + s)) / 3;
+  return Math.max(-28, Math.min(24, Math.round(grad * 95)));
+}
+
+function segmentGraphemes(text: string): string[] {
+  const Seg = (Intl as unknown as {
+    Segmenter?: new (
+      locale: string,
+      opts: { granularity: string }
+    ) => { segment: (s: string) => Iterable<{ segment: string }> };
+  }).Segmenter;
+  if (typeof Seg === 'function') {
+    const segmenter = new Seg('th', { granularity: 'grapheme' });
+    return Array.from(segmenter.segment(text), (s) => s.segment);
+  }
+  return Array.from(text);
+}
+
+function drawCurvedMapLabel(
+  ctx: CanvasRenderingContext2D,
+  lbl: MapLabel,
+  px: number,
+  py: number,
+  theme: MapTheme
+): void {
+  const fontSize = lbl.size === 'lg' ? 22 : lbl.size === 'md' ? 16 : 12;
+  const rotRad = ((lbl.rotationDeg ?? 0) * Math.PI) / 180;
+  const curve = lbl.curveAmount ?? 0;
+
+  ctx.save();
+  ctx.font = `700 ${fontSize}px Cinzel, Sarabun, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const fillColor =
+    theme === 'parchment'
+      ? lbl.style === 'water'
+        ? '#2e4a5e'
+        : '#3a2818'
+      : lbl.style === 'water'
+      ? 'rgba(147, 213, 245, 0.88)'
+      : lbl.style === 'mountain'
+      ? 'rgba(226, 216, 198, 0.92)'
+      : 'rgba(248, 232, 188, 0.94)';
+
+  ctx.fillStyle = fillColor;
+  ctx.shadowColor = theme === 'parchment' ? 'rgba(240, 228, 198, 0.85)' : 'rgba(0, 0, 0, 0.85)';
+  ctx.shadowBlur = theme === 'parchment' ? 3 : 6;
+
+  ctx.translate(px, py);
+  if (rotRad !== 0) ctx.rotate(rotRad);
+
+  const graphemes = segmentGraphemes(lbl.text);
+  if (Math.abs(curve) < 0.05 || graphemes.length < 3) {
+    ctx.fillText(lbl.text, 0, 0);
+    ctx.restore();
+    return;
+  }
+
+  const widths = graphemes.map((g) => Math.max(4, ctx.measureText(g).width + (lbl.letterSpacing ?? 1)));
+  const totalW = widths.reduce((a, b) => a + b, 0);
+  const arcRadius = Math.max(totalW * 0.65, (totalW * 1.1) / Math.max(0.15, Math.abs(curve)));
+  const dir = curve >= 0 ? 1 : -1;
+
+  let cursor = -totalW / 2;
+  for (let i = 0; i < graphemes.length; i++) {
+    const gw = widths[i];
+    const mid = cursor + gw / 2;
+    const angle = (mid / arcRadius) * dir;
+    ctx.save();
+    ctx.translate(Math.sin(angle) * arcRadius * dir, (1 - Math.cos(angle)) * arcRadius * dir);
+    ctx.rotate(angle);
+    ctx.fillText(graphemes[i], 0, 0);
+    ctx.restore();
+    cursor += gw;
+  }
+  ctx.restore();
 }
 
 function elevationColor(e: number): string {
@@ -1024,7 +1167,8 @@ export class ChunkedMapRenderer {
     cq: number,
     cr: number,
     overlay: ClimateOverlay,
-    layers: LayerVisibility
+    layers: LayerVisibility,
+    mapTheme: MapTheme
   ): { canvas: HTMLCanvasElement; originX: number; originY: number } {
     const pad = BASE_HEX_RADIUS * 2;
     const startQ = cq * CHUNK_SIZE;
@@ -1088,20 +1232,30 @@ export class ChunkedMapRenderer {
             fill = mixRgb(hexToRgb(terrainMeta.color), [42, 50, 62], 0.45);
           }
         } else if (overlay === 'terrain') {
-          const rgb = hexToRgb(terrainMeta.color);
-          const delta = (rnd - 0.5) * 10;
-          fill = `rgb(${Math.max(0, Math.min(255, Math.round(rgb[0] + delta)))},${Math.max(
+          const rgb0 = hexToRgb(terrainMeta.color);
+          const themed = applyThemeColor(rgb0, mapTheme, isWater, terrainId);
+          const hillDelta =
+            !isWater && layers.hillshade !== false
+              ? computeHillshadeDelta(map.elevation, map.width, map.height, q, r)
+              : 0;
+          const delta = (rnd - 0.5) * 10 + hillDelta;
+          fill = `rgb(${Math.max(0, Math.min(255, Math.round(themed[0] + delta)))},${Math.max(
             0,
-            Math.min(255, Math.round(rgb[1] + delta))
-          )},${Math.max(0, Math.min(255, Math.round(rgb[2] + delta)))})`;
+            Math.min(255, Math.round(themed[1] + delta))
+          )},${Math.max(0, Math.min(255, Math.round(themed[2] + delta)))})`;
         } else if (overlay === 'biome') {
           const baseCol = isWater ? (meta.isCustom ? meta.color : terrainMeta.color) : meta.color;
-          const rgb = hexToRgb(baseCol);
-          const delta = (rnd - 0.5) * 10;
-          fill = `rgb(${Math.max(0, Math.min(255, Math.round(rgb[0] + delta)))},${Math.max(
+          const rgb0 = hexToRgb(baseCol);
+          const themed = applyThemeColor(rgb0, mapTheme, isWater, terrainId);
+          const hillDelta =
+            !isWater && layers.hillshade !== false
+              ? computeHillshadeDelta(map.elevation, map.width, map.height, q, r)
+              : 0;
+          const delta = (rnd - 0.5) * 10 + hillDelta;
+          fill = `rgb(${Math.max(0, Math.min(255, Math.round(themed[0] + delta)))},${Math.max(
             0,
-            Math.min(255, Math.round(rgb[1] + delta))
-          )},${Math.max(0, Math.min(255, Math.round(rgb[2] + delta)))})`;
+            Math.min(255, Math.round(themed[1] + delta))
+          )},${Math.max(0, Math.min(255, Math.round(themed[2] + delta)))})`;
         } else {
           let baseHexCol = isWater
             ? meta.isCustom
@@ -1117,11 +1271,16 @@ export class ChunkedMapRenderer {
               baseHexCol = mixRgb(hexToRgb(baseHexCol), targetRgb, 0.32);
             }
           }
-          const rgb = baseHexCol.startsWith('rgb')
+          const rgb0 = baseHexCol.startsWith('rgb')
             ? (baseHexCol.match(/\d+/g)!.map(Number) as [number, number, number])
             : hexToRgb(baseHexCol);
+          const rgb = applyThemeColor(rgb0, mapTheme, isWater, terrainId);
           const elevShift = ((map.elevation[idx] ?? 0) - 0.15) * 16;
-          const delta = (rnd - 0.5) * 10 + (isWater ? 0 : elevShift);
+          const hillDelta =
+            !isWater && layers.hillshade !== false
+              ? computeHillshadeDelta(map.elevation, map.width, map.height, q, r)
+              : 0;
+          const delta = (rnd - 0.5) * 10 + (isWater ? 0 : elevShift + hillDelta);
           fill = `rgb(${Math.max(0, Math.min(255, Math.round(rgb[0] + delta)))},${Math.max(
             0,
             Math.min(255, Math.round(rgb[1] + delta))
@@ -1131,6 +1290,68 @@ export class ChunkedMapRenderer {
         traceHexPath(ctx, lx, ly, BASE_HEX_RADIUS + 0.45);
         ctx.fillStyle = fill;
         ctx.fill();
+
+        // Elevation Contour Lines
+        if (layers.contours && !isWater) {
+          const curLvl = Math.floor(Math.max(0, map.elevation[idx] ?? 0) * 10);
+          if (curLvl > 0) {
+            const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+            ctx.save();
+            ctx.strokeStyle =
+              mapTheme === 'parchment'
+                ? 'rgba(72, 48, 28, 0.48)'
+                : curLvl % 2 === 0
+                ? 'rgba(15, 23, 42, 0.55)'
+                : 'rgba(15, 23, 42, 0.32)';
+            ctx.lineWidth = curLvl % 2 === 0 ? 1.5 : 0.9;
+            for (const nb of nbs) {
+              if (!nb.inMap) continue;
+              const nbIdx = hexIndex(nb.q, nb.r, map.width);
+              const nbElev = Math.max(0, map.elevation[nbIdx] ?? 0);
+              if (Math.floor(nbElev * 10) < curLvl) {
+                const [x1, y1] = hexVertex(lx, ly, BASE_HEX_RADIUS - 0.4, nb.edge);
+                const [x2, y2] = hexVertex(lx, ly, BASE_HEX_RADIUS - 0.4, nb.edge + 1);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+          }
+        }
+
+        // Parchment antique coastal shoreline & concentric ink ripple lines
+        if (mapTheme === 'parchment' && isWater) {
+          const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+          ctx.save();
+          ctx.strokeStyle = 'rgba(74, 52, 32, 0.62)';
+          ctx.lineWidth = 1.25;
+          for (const nb of nbs) {
+            if (!nb.inMap) continue;
+            const nbIdx = hexIndex(nb.q, nb.r, map.width);
+            const nbWater = isWaterBiome(map.biomes[nbIdx], map.customBiomes);
+            if (!nbWater) {
+              const [x1, y1] = hexVertex(lx, ly, BASE_HEX_RADIUS - 0.4, nb.edge);
+              const [x2, y2] = hexVertex(lx, ly, BASE_HEX_RADIUS - 0.4, nb.edge + 1);
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+              const rx1 = x1 + (lx - x1) * 0.22;
+              const ry1 = y1 + (ly - y1) * 0.22;
+              const rx2 = x2 + (lx - x2) * 0.22;
+              const ry2 = y2 + (ly - y2) * 0.22;
+              ctx.strokeStyle = 'rgba(74, 52, 32, 0.25)';
+              ctx.lineWidth = 0.7;
+              ctx.beginPath();
+              ctx.moveTo(rx1, ry1);
+              ctx.lineTo(rx2, ry2);
+              ctx.stroke();
+            }
+          }
+          ctx.restore();
+        }
 
         if (
           overlay === 'none' ||
@@ -1339,10 +1560,14 @@ export class ChunkedMapRenderer {
       draftPath: HexCoord[];
       previewPath?: { hexes: HexCoord[]; valid: boolean } | null;
       measurePoints: HexCoord[];
+      mapTheme?: MapTheme;
+      refImage?: HTMLImageElement | null;
+      refOpacity?: number;
     }
   ): void {
+    const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
     const sizeKey = `${map.width}x${map.height}`;
-    const customSig = `${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
+    const customSig = `${mapTheme}_${options.layers.hillshade !== false}_${Boolean(options.layers.contours)}_${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
     const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${options.layers.cultures}_${customSig}`;
     if (
       map.id !== this.lastMapId ||
@@ -1357,7 +1582,14 @@ export class ChunkedMapRenderer {
       this.lastFlagsKey = flagsKey;
     }
 
-    ctx.fillStyle = '#0e1926';
+    ctx.fillStyle =
+      mapTheme === 'parchment'
+        ? '#b8a987'
+        : mapTheme === 'dark'
+        ? '#070b12'
+        : mapTheme === 'atlas'
+        ? '#122940'
+        : '#0e1926';
     ctx.fillRect(0, 0, viewW, viewH);
 
     ctx.save();
@@ -1389,7 +1621,8 @@ export class ChunkedMapRenderer {
           cq,
           cr,
           options.overlay,
-          options.layers
+          options.layers,
+          mapTheme
         );
         ctx.drawImage(canvas, originX, originY);
       }
@@ -1397,7 +1630,23 @@ export class ChunkedMapRenderer {
 
     const mapPixelW = map.width * SQRT3 * BASE_HEX_RADIUS + BASE_HEX_RADIUS;
     const mapPixelH = map.height * 1.5 * BASE_HEX_RADIUS + BASE_HEX_RADIUS;
-    ctx.strokeStyle = 'rgba(217, 155, 56, 0.35)';
+
+    // Optional reference sketch/trace image overlay
+    if (options.refImage && options.refImage.complete && (options.refOpacity ?? 0) > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.05, Math.min(0.95, options.refOpacity ?? 0.4));
+      ctx.drawImage(
+        options.refImage,
+        -BASE_HEX_RADIUS,
+        -BASE_HEX_RADIUS,
+        mapPixelW,
+        mapPixelH
+      );
+      ctx.restore();
+    }
+
+    ctx.strokeStyle =
+      mapTheme === 'parchment' ? 'rgba(82, 54, 28, 0.55)' : 'rgba(217, 155, 56, 0.35)';
     ctx.lineWidth = Math.max(1.5, 2 / cam.zoom);
     ctx.strokeRect(-BASE_HEX_RADIUS, -BASE_HEX_RADIUS, mapPixelW, mapPixelH);
 
@@ -1405,7 +1654,7 @@ export class ChunkedMapRenderer {
       options.layers.currents || options.overlay === 'currents'
         ? this.getCurrentData(map).streams
         : undefined;
-    drawDynamicLayers(ctx, map, cam.zoom, { ...options, currentStreams });
+    drawDynamicLayers(ctx, map, cam.zoom, { ...options, mapTheme, currentStreams });
 
     ctx.restore();
   }
@@ -1476,9 +1725,11 @@ function drawDynamicLayers(
     previewPath?: { hexes: HexCoord[]; valid: boolean } | null;
     measurePoints: HexCoord[];
     currentStreams?: CurrentStreamline[];
+    mapTheme?: MapTheme;
   }
 ): void {
   const { layers } = options;
+  const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
 
   // -1. Ocean current streamlines + manual user-drawn currents
   if (layers.currents || options.overlay === 'currents' || options.tool === 'current') {
@@ -1855,10 +2106,12 @@ function drawDynamicLayers(
         ? '#38bdf8'
         : options.tool === 'current'
         ? '#fb923c'
+        : options.tool === 'campaign'
+        ? '#ef4444'
         : '#fbbf24';
-    ctx.lineWidth = options.tool === 'current' ? 3.8 : 3.2;
+    ctx.lineWidth = options.tool === 'current' || options.tool === 'campaign' ? 3.8 : 3.2;
     ctx.lineCap = 'round';
-    if (options.tool === 'current') ctx.setLineDash([7, 5]);
+    if (options.tool === 'current' || options.tool === 'campaign') ctx.setLineDash([7, 5]);
     ctx.beginPath();
     options.draftPath.forEach((h, i) => {
       const p = hexToPixel(h.q, h.r, BASE_HEX_RADIUS);
@@ -1867,6 +2120,90 @@ function drawDynamicLayers(
     });
     ctx.stroke();
     ctx.restore();
+  }
+
+  // 5b. Military Campaigns & Advance Arrows
+  if (layers.campaigns !== false && (map.campaigns ?? []).length > 0) {
+    const kColorMap = new Map(map.kingdoms.map((k) => [k.id, k.color]));
+    for (const cp of map.campaigns!) {
+      if (!cp.points || cp.points.length < 2) continue;
+      const col = kColorMap.get(cp.kingdomId) ?? '#ef4444';
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = cp.status === 'defeat' ? 'rgba(148, 163, 184, 0.72)' : col;
+      ctx.lineWidth = cp.status === 'active' ? 3.8 : 3.0;
+      if (cp.status === 'planned') ctx.setLineDash([6, 4]);
+      else if (cp.status === 'defeat') ctx.setLineDash([3, 4]);
+
+      ctx.beginPath();
+      cp.points.forEach((pt, i) => {
+        const p = hexToPixel(pt.q, pt.r, BASE_HEX_RADIUS);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Arrowhead
+      const pPrev = hexToPixel(
+        cp.points[cp.points.length - 2].q,
+        cp.points[cp.points.length - 2].r,
+        BASE_HEX_RADIUS
+      );
+      const pEnd = hexToPixel(
+        cp.points[cp.points.length - 1].q,
+        cp.points[cp.points.length - 1].r,
+        BASE_HEX_RADIUS
+      );
+      const ang = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+      const head = Math.max(8, 10 / Math.max(0.6, zoom * 0.8));
+      ctx.fillStyle = cp.status === 'defeat' ? '#94a3b8' : col;
+      ctx.beginPath();
+      ctx.moveTo(pEnd.x, pEnd.y);
+      ctx.lineTo(pEnd.x - Math.cos(ang - 0.48) * head, pEnd.y - Math.sin(ang - 0.48) * head);
+      ctx.lineTo(pEnd.x - Math.cos(ang + 0.48) * head, pEnd.y - Math.sin(ang + 0.48) * head);
+      ctx.closePath();
+      ctx.fill();
+
+      // Campaign Name tag at midpoint
+      if (zoom >= 0.4) {
+        const midPt = cp.points[Math.floor(cp.points.length / 2)];
+        const mp = hexToPixel(midPt.q, midPt.r, BASE_HEX_RADIUS);
+        ctx.font = '600 10px Sarabun, sans-serif';
+        const label = `⚔️ ${cp.name}`;
+        const tw = ctx.measureText(label).width + 10;
+        ctx.fillStyle = 'rgba(15, 23, 34, 0.88)';
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(mp.x - tw / 2, mp.y - 16, tw, 17, 4);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#fde68a';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, mp.x, mp.y - 7.5);
+      }
+
+      // Battle markers along campaign
+      for (const b of cp.battles ?? []) {
+        const bp = hexToPixel(b.q, b.r, BASE_HEX_RADIUS);
+        ctx.fillStyle = '#7f1d1d';
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(bp.x, bp.y, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText('⚔', bp.x, bp.y + 0.5);
+      }
+      ctx.restore();
+    }
   }
 
   // 6. POIs (built-in + custom)
@@ -1913,25 +2250,11 @@ function drawDynamicLayers(
     );
   }
 
-  // 8. Custom Map Labels
+  // 8. Custom Map Labels (supports curved arcs & rotation)
   if (layers.labels) {
     for (const lbl of map.labels) {
       const p = hexToPixel(lbl.q, lbl.r, BASE_HEX_RADIUS);
-      const fontSize = lbl.size === 'lg' ? 22 : lbl.size === 'md' ? 16 : 12;
-      ctx.save();
-      ctx.font = `700 ${fontSize}px Cinzel, Sarabun, serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle =
-        lbl.style === 'water'
-          ? 'rgba(147, 213, 245, 0.85)'
-          : lbl.style === 'mountain'
-          ? 'rgba(226, 216, 198, 0.9)'
-          : 'rgba(248, 232, 188, 0.92)';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-      ctx.shadowBlur = 6;
-      ctx.fillText(lbl.text, p.x, p.y);
-      ctx.restore();
+      drawCurvedMapLabel(ctx, lbl, p.x, p.y, mapTheme);
     }
   }
 
@@ -2077,8 +2400,10 @@ export function exportMapToPng(
     layers: LayerVisibility;
     includeLegend: boolean;
     includeScale: boolean;
+    mapTheme?: MapTheme;
   }
 ): string {
+  const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
   const maxDim = Math.max(map.width, map.height);
   const hexRadius = maxDim > 200 ? 10 : maxDim > 140 ? 13 : 16;
   const padTop = 64;
@@ -2188,8 +2513,49 @@ export function exportMapToPng(
           hexFill = mixRgb(hexToRgb(hexFill), targetRgb, 0.32);
         }
       }
+      if (
+        options.overlay === 'none' ||
+        options.overlay === 'terrain' ||
+        options.overlay === 'biome'
+      ) {
+        const rgb0 = hexFill.startsWith('rgb')
+          ? (hexFill.match(/\d+/g)!.map(Number) as [number, number, number])
+          : hexToRgb(hexFill);
+        const themed = applyThemeColor(rgb0, mapTheme, isWater, terrainId);
+        const hillDelta =
+          !isWater && options.layers.hillshade !== false
+            ? computeHillshadeDelta(map.elevation, map.width, map.height, q, r)
+            : 0;
+        hexFill = `rgb(${Math.max(0, Math.min(255, themed[0] + hillDelta))},${Math.max(
+          0,
+          Math.min(255, themed[1] + hillDelta)
+        )},${Math.max(0, Math.min(255, themed[2] + hillDelta))})`;
+      }
       ctx.fillStyle = hexFill;
       ctx.fill();
+      if (options.layers.contours && !isWater) {
+        const curLvl = Math.floor(Math.max(0, map.elevation[idx] ?? 0) * 10);
+        if (curLvl > 0) {
+          const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+          ctx.save();
+          ctx.strokeStyle =
+            mapTheme === 'parchment' ? 'rgba(72, 48, 28, 0.48)' : 'rgba(15, 23, 42, 0.45)';
+          ctx.lineWidth = curLvl % 2 === 0 ? 1.4 : 0.85;
+          for (const nb of nbs) {
+            if (!nb.inMap) continue;
+            const nbIdx = hexIndex(nb.q, nb.r, map.width);
+            if (Math.floor(Math.max(0, map.elevation[nbIdx] ?? 0) * 10) < curLvl) {
+              const [x1, y1] = hexVertex(pos.x, pos.y, hexRadius - 0.4, nb.edge);
+              const [x2, y2] = hexVertex(pos.x, pos.y, hexRadius - 0.4, nb.edge + 1);
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+          }
+          ctx.restore();
+        }
+      }
       if (
         options.overlay === 'none' ||
         options.overlay === 'terrain' ||
@@ -2341,6 +2707,7 @@ export function exportMapToPng(
     draftPath: [],
     measurePoints: [],
     currentStreams: exportStreams,
+    mapTheme,
   });
   ctx.restore();
   ctx.restore();

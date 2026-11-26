@@ -14,8 +14,10 @@ import {
   Redo2,
   Route,
   Ruler,
+  Search,
   Sparkles,
   Store,
+  Swords,
   Trees,
   Undo2,
   Waves,
@@ -37,6 +39,7 @@ interface TopBarProps {
   onToggleMinimap: () => void;
   onOpenLibrary: () => void;
   onOpenSizeModal: () => void;
+  onOpenQuickSearch: () => void;
   onQuickGenerateWorld: () => void;
 }
 
@@ -59,6 +62,7 @@ const TOOL_GROUPS: {
     { id: 'territory', label: 'ดินแดน', icon: <Crown className="w-3.5 h-3.5" />, shortcut: '5' },
     { id: 'religion', label: 'ศาสนา', icon: <Flame className="w-3.5 h-3.5" />, shortcut: '6' },
     { id: 'culture', label: 'วัฒนธรรม', icon: <Landmark className="w-3.5 h-3.5" />, shortcut: '' },
+    { id: 'campaign', label: 'เดินทัพ', icon: <Swords className="w-3.5 h-3.5" />, shortcut: '' },
   ],
   [
     { id: 'road', label: 'ถนน / เดินเรือ', icon: <Route className="w-3.5 h-3.5" />, shortcut: '7' },
@@ -82,6 +86,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleMinimap,
   onOpenLibrary,
   onOpenSizeModal,
+  onOpenQuickSearch,
   onQuickGenerateWorld,
 }) => {
   const [editingTitle, setEditingTitle] = useState(false);
@@ -200,6 +205,15 @@ export const TopBar: React.FC<TopBarProps> = ({
           />
           {autosaveStatus === 'saving' ? 'กำลังบันทึก...' : 'บันทึกแล้ว'}
         </span>
+
+        <button
+          onClick={onOpenQuickSearch}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] hover:bg-[#202c3b] border border-slate-800 text-slate-300 transition cursor-pointer"
+          title="ค้นหาด่วนและบุ๊กมาร์ก (Ctrl+K)"
+        >
+          <Search className="w-3.5 h-3.5 text-amber-400" />
+          <span className="hidden xl:inline text-[11px] text-slate-400">Ctrl+K</span>
+        </button>
 
         <button
           onClick={onToggleMinimap}

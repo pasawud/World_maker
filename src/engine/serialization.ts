@@ -319,6 +319,22 @@ export function parseMapFromJson(raw: string): HexMapData {
               : [],
           }
         : undefined,
+    mapTheme:
+      obj.mapTheme === 'parchment' || obj.mapTheme === 'atlas' || obj.mapTheme === 'dark'
+        ? obj.mapTheme
+        : 'standard',
+    diplomacy: Array.isArray(obj.diplomacy)
+      ? (obj.diplomacy as HexMapData['diplomacy'])
+      : [],
+    campaigns: Array.isArray(obj.campaigns)
+      ? (obj.campaigns as HexMapData['campaigns'])
+      : [],
+    wikiEntries: Array.isArray(obj.wikiEntries)
+      ? (obj.wikiEntries as HexMapData['wikiEntries'])
+      : [],
+    bookmarks: Array.isArray(obj.bookmarks)
+      ? (obj.bookmarks as HexMapData['bookmarks'])
+      : [],
     roads,
     tradeRoutes: Array.isArray(obj.tradeRoutes) ? (obj.tradeRoutes as HexMapData['tradeRoutes']) : [],
     pois: Array.isArray(obj.pois) ? (obj.pois as HexMapData['pois']) : [],
@@ -357,6 +373,11 @@ export function resizeMap(
       customGovernmentTypes: map.customGovernmentTypes ?? [],
       customReligionTypes: map.customReligionTypes ?? [],
       customCultureTypes: map.customCultureTypes ?? [],
+      mapTheme: map.mapTheme ?? 'standard',
+      diplomacy: map.diplomacy ?? [],
+      campaigns: [],
+      wikiEntries: map.wikiEntries ?? [],
+      bookmarks: [],
     };
   }
 
@@ -414,6 +435,14 @@ export function resizeMap(
       points: cur.points.filter((p) => inNewBounds(p.q, p.r)),
     }))
     .filter((cur) => cur.points.length >= 2);
+  const campaigns = (map.campaigns ?? [])
+    .map((cp) => ({
+      ...cp,
+      points: cp.points.filter((p) => inNewBounds(p.q, p.r)),
+      battles: (cp.battles ?? []).filter((b) => inNewBounds(b.q, b.r)),
+    }))
+    .filter((cp) => cp.points.length >= 2);
+  const bookmarks = (map.bookmarks ?? []).filter((bm) => inNewBounds(bm.q, bm.r));
 
   const nextMap: HexMapData = {
     ...map,
@@ -432,6 +461,8 @@ export function resizeMap(
     cultures,
     rivers,
     manualCurrents,
+    campaigns,
+    bookmarks,
     cities,
     roads,
     pois,

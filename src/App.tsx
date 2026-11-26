@@ -5,13 +5,16 @@ import { CustomAssetsModal, CustomStudioTab } from './components/CustomAssetsMod
 import { EconomyModal } from './components/EconomyModal';
 import { EntityLoreModal } from './components/EntityLoreModal';
 import { ExportImportModal } from './components/ExportImportModal';
+import { HeightmapSubMapModal } from './components/HeightmapSubMapModal';
 import { MapCanvas } from './components/MapCanvas';
 import { MapSizeModal } from './components/MapSizeModal';
+import { QuickSearchModal } from './components/QuickSearchModal';
 import { RightSidebar } from './components/RightSidebar';
 import { SubBar } from './components/SubBar';
 import { TimelineBar } from './components/TimelineBar';
 import { TimelineModal } from './components/TimelineModal';
 import { TopBar } from './components/TopBar';
+import { WorldbuildingModal } from './components/WorldbuildingModal';
 import { getAllPoiTypes } from './data/goods';
 import { hexDistance } from './engine/hexMath';
 import { exportMapToPng } from './engine/renderer';
@@ -33,6 +36,9 @@ export function App() {
   } | null>(null);
   const [showTimelineBar, setShowTimelineBar] = useState(false);
   const [showTimelineModal, setShowTimelineModal] = useState(false);
+  const [showWorldbuildingModal, setShowWorldbuildingModal] = useState(false);
+  const [showHeightmapModal, setShowHeightmapModal] = useState(false);
+  const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -42,6 +48,11 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowQuickSearch((s) => !s);
+        return;
+      }
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -145,6 +156,7 @@ export function App() {
         onToggleMinimap={() => editor.setShowMinimap((s) => !s)}
         onOpenLibrary={() => setShowExportModal(true)}
         onOpenSizeModal={() => setShowSizeModal(true)}
+        onOpenQuickSearch={() => setShowQuickSearch(true)}
         onQuickGenerateWorld={handleQuickGenerate}
       />
 
@@ -152,6 +164,8 @@ export function App() {
         map={editor.map}
         overlay={editor.climateOverlay}
         onChangeOverlay={editor.setClimateOverlay}
+        mapTheme={editor.map.mapTheme ?? 'standard'}
+        onChangeMapTheme={editor.setMapTheme}
         layers={editor.layers}
         onToggleLayer={editor.toggleLayer}
         showTimelineBar={showTimelineBar}
@@ -161,6 +175,8 @@ export function App() {
         }}
         onOpenSizeModal={() => setShowSizeModal(true)}
         onOpenEconomyModal={() => setShowEconomyModal(true)}
+        onOpenWorldbuildingModal={() => setShowWorldbuildingModal(true)}
+        onOpenHeightmapModal={() => setShowHeightmapModal(true)}
         onOpenCustomModal={() => setCustomModalTab('terrains')}
         onOpenExportModal={() => setShowExportModal(true)}
       />
@@ -241,6 +257,34 @@ export function App() {
           onChangePoiType={editor.setPoiType}
           labelStyle={editor.labelStyle}
           onChangeLabelStyle={editor.setLabelStyle}
+          labelSize={editor.labelSize}
+          onChangeLabelSize={editor.setLabelSize}
+          labelRotation={editor.labelRotation}
+          onChangeLabelRotation={editor.setLabelRotation}
+          labelCurve={editor.labelCurve}
+          onChangeLabelCurve={editor.setLabelCurve}
+          campaignSubTool={editor.campaignSubTool}
+          onChangeCampaignSubTool={editor.setCampaignSubTool}
+          campaignKingdomId={editor.campaignKingdomId}
+          onChangeCampaignKingdomId={editor.setCampaignKingdomId}
+          onAddCampaignPath={(hexes) => {
+            const count = (editor.map.campaigns ?? []).length + 1;
+            const k = editor.map.kingdoms.find((kk) => kk.id === editor.campaignKingdomId);
+            editor.addCampaign({
+              name: `ยุทธการ ${k?.name ?? ''} #${count}`.trim(),
+              kingdomId: editor.campaignKingdomId,
+              status: 'active',
+              points: hexes,
+            });
+            showToast('เพิ่มเส้นทางการเคลื่อนทัพแล้ว');
+          }}
+          onEraseCampaignNear={(q, r) => {
+            editor.eraseCampaignNear(q, r);
+            showToast('ลบเส้นทางเดินทัพแล้ว');
+          }}
+          referenceOverlay={editor.referenceOverlay}
+          onChangeReferenceOverlay={editor.setReferenceOverlay}
+          focusTarget={editor.focusTarget}
           climateOverlay={editor.climateOverlay}
           layers={editor.layers}
           selectedCityId={editor.selectedCityId}
@@ -344,8 +388,10 @@ export function App() {
                     text,
                     q,
                     r,
-                    size: 'md',
+                    size: editor.labelSize,
                     style: editor.labelStyle,
+                    rotationDeg: editor.labelRotation,
+                    curveAmount: editor.labelCurve,
                   },
                 ],
               }),
@@ -492,6 +538,14 @@ export function App() {
           tradeStartCityId={editor.tradeStartCityId}
           onCancelTradeStart={() => editor.setTradeStartCityId(null)}
           onOpenCustomModal={(tab) => setCustomModalTab(tab)}
+          onOpenWorldbuildingModal={() => setShowWorldbuildingModal(true)}
+          campaignKingdomId={editor.campaignKingdomId}
+          onChangeCampaignKingdomId={editor.setCampaignKingdomId}
+          onUpdateCampaign={editor.updateCampaign}
+          onDeleteCampaign={editor.deleteCampaign}
+          onUpdateMapLabel={editor.updateMapLabel}
+          onDeleteMapLabel={editor.deleteMapLabel}
+          onJumpToCoord={editor.jumpToHex}
           onOpenExportModal={() => setShowExportModal(true)}
           onQuickPngExport={handleQuickPngExport}
           onClearMap={() => {
@@ -669,6 +723,50 @@ export function App() {
             showToast(`โหลดแผนที่ "${m.name}" เรียบร้อยแล้ว`);
           }}
           onClose={() => setShowExportModal(false)}
+        />
+      )}
+
+      {showWorldbuildingModal && (
+        <WorldbuildingModal
+          map={editor.map}
+          onUpsertDiplomacy={editor.upsertDiplomacy}
+          onAddCampaign={editor.addCampaign}
+          onUpdateCampaign={editor.updateCampaign}
+          onDeleteCampaign={editor.deleteCampaign}
+          onAddWikiEntry={editor.addWikiEntry}
+          onUpdateWikiEntry={editor.updateWikiEntry}
+          onDeleteWikiEntry={editor.deleteWikiEntry}
+          onJumpToCoord={editor.jumpToHex}
+          onStartDrawCampaign={(kId) => {
+            editor.setCampaignKingdomId(kId);
+            editor.setTool('campaign');
+          }}
+          onClose={() => setShowWorldbuildingModal(false)}
+        />
+      )}
+
+      {showHeightmapModal && (
+        <HeightmapSubMapModal
+          map={editor.map}
+          referenceOverlay={editor.referenceOverlay}
+          onChangeReferenceOverlay={editor.setReferenceOverlay}
+          onReplaceMap={(nextMap) => editor.loadImportedMap(nextMap)}
+          onNotify={showToast}
+          onClose={() => setShowHeightmapModal(false)}
+        />
+      )}
+
+      {showQuickSearch && (
+        <QuickSearchModal
+          map={editor.map}
+          onJumpToCoord={editor.jumpToHex}
+          onSelectCity={(cityId) => {
+            editor.setSelectedCityId(cityId);
+            editor.setTool('city');
+          }}
+          onAddBookmark={editor.addBookmark}
+          onDeleteBookmark={editor.deleteBookmark}
+          onClose={() => setShowQuickSearch(false)}
         />
       )}
     </div>

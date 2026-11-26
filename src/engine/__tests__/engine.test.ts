@@ -11,6 +11,15 @@ import {
   formatElevationMeters,
   sculptElevationBrush,
 } from '../elevation';
+import { convertHeightmapPixelsToMap } from '../heightmap';
+import { extractRegionalSubMap } from '../submap';
+import {
+  exportLorebookHtml,
+  exportLorebookMarkdown,
+  getDiplomaticRelation,
+  parseWikiMentions,
+  upsertDiplomaticRelation,
+} from '../worldbuilding';
 import {
   autoDetectCliffsFromElevation,
   getCliffEdges,
@@ -1463,5 +1472,133 @@ describe('Deep Customization, Adjustable Ocean Currents & Continuous Elevation',
     const recomputed = recomputeBiomesFromCurrentMap(map);
     expect(recomputed.elevation[idxA]).toBeCloseTo(0.60, 2);
     expect(recomputed.elevation[idxB]).toBeCloseTo(0.76, 2);
+  });
+});
+
+describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () => {
+  it('converts RGBA heightmap pixel buffers into sea and continents with rivers and climate', () => {
+    const imgW = 32;
+    const imgH = 24;
+    const rgba = new Uint8ClampedArray(imgW * imgH * 4);
+    for (let y = 0; y < imgH; y++) {
+      for (let x = 0; x < imgW; x++) {
+        const i = (y * imgW + x) * 4;
+        const inCenter = x >= 8 && x <= 23 && y >= 6 && y <= 17;
+        const val = inCenter ? (x === 15 && y === 11 ? 245 : 175) : 30;
+        rgba[i] = val;
+        rgba[i + 1] = val;
+        rgba[i + 2] = val;
+        rgba[i + 3] = 255;
+      }
+    }
+
+    const hmMap = convertHeightmapPixelsToMap(rgba, imgW, imgH, 32, 24, 25, {
+      name: 'จากภาพ Heightmap',
+      seaLevelThreshold: 0.38,
+    });
+
+    expect(hmMap.name).toBe('จากภาพ Heightmap');
+    const centerTerrain = hmMap.terrains[hexIndex(15, 11, 32)];
+    const cornerTerrain = hmMap.terrains[hexIndex(1, 1, 32)];
+    expect(centerTerrain).toBeGreaterThanOrEqual(TerrainId.MOUNTAIN);
+    expect(cornerTerrain).toBe(TerrainId.DEEP_OCEAN);
+  });
+
+  it('extracts a 2x regional sub-map preserving coastline, scaled cities, labels, and diplomacy', () => {
+    const src = generateWorld(40, 30, 30, DEFAULT_GEOGRAPHY_CONFIG, 'โลกต้นฉบับ');
+    src.diplomacy = upsertDiplomaticRelation([], src.kingdoms[0].id, src.kingdoms[1].id, 'ally', 'พันธมิตรเก่า');
+    src.labels.push({
+      id: 'lbl_arc',
+      text: 'มหาสมุทรตะวันตก',
+      q: 15,
+      r: 12,
+      size: 'lg',
+      style: 'water',
+      rotationDeg: -15,
+      curveAmount: 0.4,
+    });
+
+    const sub = extractRegionalSubMap(
+      src,
+      { minQ: 10, maxQ: 24, minR: 8, maxR: 18 },
+      2,
+      'แคว้นกลาง'
+    );
+
+    expect(sub.name).toBe('แคว้นกลาง');
+    expect(sub.width).toBe(30);
+    expect(sub.height).toBe(22);
+    expect(sub.hexSizeKm).toBe(15);
+    expect(sub.diplomacy?.length).toBe(1);
+    expect(sub.labels.some((l) => l.text === 'มหาสมุทรตะวันตก' && l.curveAmount === 0.4)).toBe(true);
+  });
+
+  it('manages diplomacy relations, @mentions, Lorebook export, and full JSON serialization round-trip', () => {
+    const map = generateWorld(30, 22, 25, DEFAULT_GEOGRAPHY_CONFIG, 'อาณาจักรนิยาย');
+    map.mapTheme = 'parchment';
+    const k1 = map.kingdoms[0];
+    const k2 = map.kingdoms[1];
+    map.diplomacy = upsertDiplomaticRelation([], k1.id, k2.id, 'war', 'สงครามชิงแร่เหล็ก');
+    expect(getDiplomaticRelation(map.diplomacy, k2.id, k1.id)?.status).toBe('war');
+
+    const city = map.cities[0];
+    map.campaigns = [
+      {
+        id: 'cp1',
+        name: 'ทัพหลวงสายฟ้า',
+        kingdomId: k1.id,
+        status: 'active',
+        points: [
+          { q: 5, r: 5 },
+          { q: 8, r: 6 },
+        ],
+      },
+    ];
+    map.wikiEntries = [
+      {
+        id: 'w1',
+        title: 'พงศาวดารปฐมบท',
+        category: 'history',
+        summary: 'จุดเริ่มต้นของสงคราม',
+        content: city ? `กษัตริย์เดินทัพออกจาก @${city.name} เพื่อรบกับ @${k2.name}` : `รบกับ @${k2.name}`,
+        tags: ['สงคราม', 'ประวัติศาสตร์'],
+        linkedCoord: city ? { q: city.q, r: city.r } : { q: 4, r: 4 },
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    map.bookmarks = [{ id: 'bm1', name: 'เมืองหลวง', q: 5, r: 5, zoom: 1.2 }];
+    map.labels.push({
+      id: 'lbl_1',
+      text: 'เทือกเขาเหนือ',
+      q: 10,
+      r: 4,
+      size: 'md',
+      style: 'mountain',
+      rotationDeg: 10,
+      curveAmount: -0.3,
+    });
+
+    if (city) {
+      const tokens = parseWikiMentions(map.wikiEntries[0].content, map);
+      expect(tokens.some((t) => t.mention?.kind === 'city' && t.mention.coord?.q === city.q)).toBe(true);
+    }
+
+    const md = exportLorebookMarkdown(map);
+    expect(md).toContain('อาณาจักรนิยาย');
+    expect(md).toContain('สงครามชิงแร่เหล็ก');
+    expect(md).toContain('ทัพหลวงสายฟ้า');
+    expect(md).toContain('พงศาวดารปฐมบท');
+
+    const html = exportLorebookHtml(map);
+    expect(html).toContain('<html');
+    expect(html).toContain('พงศาวดารปฐมบท');
+
+    const restored = parseMapFromJson(serializeMapToJson(map));
+    expect(restored.mapTheme).toBe('parchment');
+    expect(restored.diplomacy?.length).toBe(1);
+    expect(restored.campaigns?.[0].name).toBe('ทัพหลวงสายฟ้า');
+    expect(restored.wikiEntries?.[0].title).toBe('พงศาวดารปฐมบท');
+    expect(restored.bookmarks?.[0].name).toBe('เมืองหลวง');
+    expect(restored.labels.find((l) => l.id === 'lbl_1')?.curveAmount).toBe(-0.3);
   });
 });

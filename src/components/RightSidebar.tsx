@@ -14,6 +14,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Store,
+  Swords,
   Trash2,
   Upload,
   Waves,
@@ -52,6 +53,8 @@ import {
   HexCoord,
   HexMapData,
   Kingdom,
+  MapLabel,
+  MilitaryCampaign,
   Religion,
   ReligionType,
   ToolMode,
@@ -125,6 +128,14 @@ interface RightSidebarProps {
   tradeStartCityId: string | null;
   onCancelTradeStart: () => void;
   onOpenCustomModal: (tab: 'terrains' | 'biomes' | 'features' | 'pois') => void;
+  onOpenWorldbuildingModal: () => void;
+  campaignKingdomId: string;
+  onChangeCampaignKingdomId: (id: string) => void;
+  onUpdateCampaign: (id: string, patch: Partial<MilitaryCampaign>) => void;
+  onDeleteCampaign: (id: string) => void;
+  onUpdateMapLabel: (id: string, patch: Partial<MapLabel>) => void;
+  onDeleteMapLabel: (id: string) => void;
+  onJumpToCoord: (q: number, r: number, zoom?: number) => void;
   onOpenExportModal: () => void;
   onQuickPngExport: () => void;
   onClearMap: () => void;
@@ -195,6 +206,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     tradeStartCityId,
     onCancelTradeStart,
     onOpenCustomModal,
+    onOpenWorldbuildingModal,
+    campaignKingdomId,
+    onChangeCampaignKingdomId,
+    onUpdateCampaign,
+    onDeleteCampaign,
+    onUpdateMapLabel,
+    onDeleteMapLabel,
+    onJumpToCoord,
     onOpenExportModal,
     onQuickPngExport,
     onClearMap,
@@ -476,6 +495,147 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {tool === 'campaign' && (
+        <div className="bg-[#151d28] border border-rose-500/40 rounded-lg p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-rose-300 flex items-center gap-1.5">
+              <Swords className="w-4 h-4" />
+              การเคลื่อนทัพ & สมรภูมิ
+            </h3>
+            <button
+              onClick={onOpenWorldbuildingModal}
+              className="px-2 py-0.5 rounded text-[10px] border border-amber-500/50 text-amber-200 hover:bg-amber-500/15 cursor-pointer"
+            >
+              หน้าต่างการทูต/Wiki
+            </button>
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-400 mb-1">ฝ่ายที่เดินทัพ</label>
+            <select
+              value={campaignKingdomId}
+              onChange={(e) => onChangeCampaignKingdomId(e.target.value)}
+              className="w-full bg-[#0f1620] border border-slate-700 rounded px-2 py-1 text-xs text-slate-100"
+            >
+              {map.kingdoms.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {(map.campaigns ?? []).length === 0 ? (
+              <div className="text-[11px] text-slate-500">ลากบนแผนที่เพื่อสร้างเส้นทางเดินทัพ</div>
+            ) : (
+              map.campaigns!.map((cp) => (
+                <div
+                  key={cp.id}
+                  className="bg-[#0f1620] border border-slate-800 rounded p-2 space-y-1 text-[11px]"
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <input
+                      value={cp.name}
+                      onChange={(e) => onUpdateCampaign(cp.id, { name: e.target.value })}
+                      className="flex-1 bg-transparent font-semibold text-slate-100 outline-none border-b border-transparent focus:border-amber-400"
+                    />
+                    <button
+                      onClick={() => onDeleteCampaign(cp.id)}
+                      className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <select
+                      value={cp.status}
+                      onChange={(e) =>
+                        onUpdateCampaign(cp.id, {
+                          status: e.target.value as MilitaryCampaign['status'],
+                        })
+                      }
+                      className="bg-[#161f2c] border border-slate-700 rounded px-1.5 py-0.5 text-[10px]"
+                    >
+                      <option value="planned">วางแผน</option>
+                      <option value="active">กำลังรุกคืบ</option>
+                      <option value="victory">มีชัยชนะ</option>
+                      <option value="defeat">พ่ายแพ้</option>
+                    </select>
+                    {cp.points[0] && (
+                      <button
+                        onClick={() => onJumpToCoord(cp.points[0].q, cp.points[0].r, 1.0)}
+                        className="text-sky-300 hover:underline text-[10px] cursor-pointer"
+                      >
+                        ไปยังทัพ
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {tool === 'poi' && map.labels.length > 0 && (
+        <div className="bg-[#151d28] border border-amber-500/35 rounded-lg p-3 space-y-2">
+          <h3 className="text-xs font-semibold text-amber-300">
+            ป้ายชื่อภูมิภาค & ตัวอักษรโค้ง ({map.labels.length})
+          </h3>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {map.labels.map((lbl) => (
+              <div
+                key={lbl.id}
+                className="bg-[#0f1620] border border-slate-800 rounded p-2 space-y-1 text-[11px]"
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <input
+                    value={lbl.text}
+                    onChange={(e) => onUpdateMapLabel(lbl.id, { text: e.target.value })}
+                    className="flex-1 bg-transparent text-slate-100 font-medium outline-none border-b border-transparent focus:border-amber-400"
+                  />
+                  <button
+                    onClick={() => onDeleteMapLabel(lbl.id)}
+                    className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 text-[10px] text-slate-400">
+                  <label className="flex items-center justify-between">
+                    <span>เอียง {lbl.rotationDeg ?? 0}°</span>
+                    <input
+                      type="range"
+                      min={-75}
+                      max={75}
+                      step={5}
+                      value={lbl.rotationDeg ?? 0}
+                      onChange={(e) =>
+                        onUpdateMapLabel(lbl.id, { rotationDeg: Number(e.target.value) })
+                      }
+                      className="w-16"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span>โค้ง {(lbl.curveAmount ?? 0).toFixed(1)}</span>
+                    <input
+                      type="range"
+                      min={-1}
+                      max={1}
+                      step={0.1}
+                      value={lbl.curveAmount ?? 0}
+                      onChange={(e) =>
+                        onUpdateMapLabel(lbl.id, { curveAmount: Number(e.target.value) })
+                      }
+                      className="w-16"
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

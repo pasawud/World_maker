@@ -39,8 +39,10 @@ import {
   generateWorld,
   recomputeBiomesFromCurrentMap,
 } from '../engine/worldGenerator';
+import { upsertDiplomaticRelation } from '../engine/worldbuilding';
 import {
   BiomeId,
+  CameraBookmark,
   City,
   ClimateOverlay,
   Culture,
@@ -48,13 +50,19 @@ import {
   CustomCategoryType,
   CustomPoiType,
   CustomTerrain,
+  DiplomaticRelationType,
   GeographyConfig,
   HexCoord,
   HexMapData,
   Kingdom,
+  LabelSize,
   LabelStyle,
   LayerVisibility,
+  MapLabel,
+  MapTheme,
+  MilitaryCampaign,
   PoiType,
+  ReferenceOverlayConfig,
   Religion,
   RoadType,
   SpecialFeatureMeta,
@@ -62,6 +70,7 @@ import {
   ToolMode,
   TradeMode,
   TravelSpeedId,
+  WikiEntry,
   WorldTimeline,
 } from '../types/map';
 
@@ -98,6 +107,21 @@ export function useMapEditor() {
   const [poiSubTool, setPoiSubTool] = useState<'poi' | 'label'>('poi');
   const [poiType, setPoiType] = useState<PoiType>('ruins');
   const [labelStyle, setLabelStyle] = useState<LabelStyle>('region');
+  const [labelSize, setLabelSize] = useState<LabelSize>('md');
+  const [labelRotation, setLabelRotation] = useState<number>(0);
+  const [labelCurve, setLabelCurve] = useState<number>(0);
+  const [labelDraftText, setLabelDraftText] = useState<string>('');
+  const [campaignSubTool, setCampaignSubTool] = useState<'draw' | 'erase'>('draw');
+  const [campaignKingdomId, setCampaignKingdomId] = useState<string>(
+    () => map.kingdoms[0]?.id ?? 'north'
+  );
+  const [referenceOverlay, setReferenceOverlay] = useState<ReferenceOverlayConfig | null>(null);
+  const [focusTarget, setFocusTarget] = useState<{
+    q: number;
+    r: number;
+    zoom?: number;
+    nonce: number;
+  } | null>(null);
   const [climateOverlay, setClimateOverlay] = useState<ClimateOverlay>('none');
   const [measureMode, setMeasureMode] = useState<'straight' | 'terrain'>('terrain');
   const [travelSpeed, setTravelSpeed] = useState<TravelSpeedId>('caravan');
@@ -120,6 +144,9 @@ export function useMapEditor() {
     grid: false,
     graticule: false,
     currents: false,
+    hillshade: true,
+    contours: false,
+    campaigns: true,
     cityNames: true,
     labels: true,
     territories: true,
@@ -1735,6 +1762,201 @@ export function useMapEditor() {
     [commitMapChange]
   );
 
+  const setMapTheme = useCallback(
+    (theme: MapTheme) => {
+      commitMapChange((prev) => ({ ...prev, mapTheme: theme }), []);
+    },
+    [commitMapChange]
+  );
+
+  const upsertDiplomacy = useCallback(
+    (
+      kingdomA: string,
+      kingdomB: string,
+      status: DiplomaticRelationType,
+      notes?: string
+    ) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          diplomacy: upsertDiplomaticRelation(prev.diplomacy, kingdomA, kingdomB, status, notes),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const addCampaign = useCallback(
+    (cp: Omit<MilitaryCampaign, 'id'>) => {
+      const created: MilitaryCampaign = {
+        ...cp,
+        id: `cp_${Date.now().toString(36)}`,
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          campaigns: [...(prev.campaigns ?? []), created],
+        }),
+        []
+      );
+      return created;
+    },
+    [commitMapChange]
+  );
+
+  const updateCampaign = useCallback(
+    (id: string, patch: Partial<MilitaryCampaign>) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          campaigns: (prev.campaigns ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const deleteCampaign = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          campaigns: (prev.campaigns ?? []).filter((c) => c.id !== id),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const eraseCampaignNear = useCallback(
+    (q: number, r: number) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          campaigns: (prev.campaigns ?? []).filter(
+            (c) => !c.points.some((p) => hexDistance(p, { q, r }) <= 1)
+          ),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const addWikiEntry = useCallback(
+    (entry: Omit<WikiEntry, 'id' | 'updatedAt'>) => {
+      const created: WikiEntry = {
+        ...entry,
+        id: `wiki_${Date.now().toString(36)}`,
+        updatedAt: new Date().toISOString(),
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          wikiEntries: [...(prev.wikiEntries ?? []), created],
+        }),
+        []
+      );
+      return created;
+    },
+    [commitMapChange]
+  );
+
+  const updateWikiEntry = useCallback(
+    (id: string, patch: Partial<WikiEntry>) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          wikiEntries: (prev.wikiEntries ?? []).map((w) =>
+            w.id === id ? { ...w, ...patch, updatedAt: new Date().toISOString() } : w
+          ),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const deleteWikiEntry = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          wikiEntries: (prev.wikiEntries ?? []).filter((w) => w.id !== id),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const addBookmark = useCallback(
+    (name: string, q: number, r: number, zoom: number) => {
+      const bm: CameraBookmark = {
+        id: `bm_${Date.now().toString(36)}`,
+        name: name.trim(),
+        q,
+        r,
+        zoom,
+      };
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          bookmarks: [...(prev.bookmarks ?? []), bm],
+        }),
+        []
+      );
+      return bm;
+    },
+    [commitMapChange]
+  );
+
+  const deleteBookmark = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          bookmarks: (prev.bookmarks ?? []).filter((b) => b.id !== id),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const updateMapLabel = useCallback(
+    (id: string, patch: Partial<MapLabel>) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          labels: prev.labels.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const deleteMapLabel = useCallback(
+    (id: string) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          labels: prev.labels.filter((l) => l.id !== id),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
+  const jumpToHex = useCallback((q: number, r: number, zoom?: number) => {
+    setFocusTarget((prev) => ({ q, r, zoom, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
   return {
     map,
     setMap,
@@ -1783,6 +2005,22 @@ export function useMapEditor() {
     setPoiType,
     labelStyle,
     setLabelStyle,
+    labelSize,
+    setLabelSize,
+    labelRotation,
+    setLabelRotation,
+    labelCurve,
+    setLabelCurve,
+    labelDraftText,
+    setLabelDraftText,
+    campaignSubTool,
+    setCampaignSubTool,
+    campaignKingdomId,
+    setCampaignKingdomId,
+    referenceOverlay,
+    setReferenceOverlay,
+    focusTarget,
+    jumpToHex,
     climateOverlay,
     setClimateOverlay,
     measureMode,
@@ -1875,5 +2113,18 @@ export function useMapEditor() {
     createEraFromCurrent,
     saveActiveEra,
     updateTimelineMeta,
+    setMapTheme,
+    upsertDiplomacy,
+    addCampaign,
+    updateCampaign,
+    deleteCampaign,
+    eraseCampaignNear,
+    addWikiEntry,
+    updateWikiEntry,
+    deleteWikiEntry,
+    addBookmark,
+    deleteBookmark,
+    updateMapLabel,
+    deleteMapLabel,
   };
 }

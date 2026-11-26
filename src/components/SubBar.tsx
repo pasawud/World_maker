@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  BookOpen,
   ChevronDown,
   Clock,
+  Crop,
   Download,
   Eye,
   Grid3X3,
@@ -12,18 +14,22 @@ import {
   Users,
 } from 'lucide-react';
 import { computeRealDimensions } from '../engine/hexMath';
-import { ClimateOverlay, HexMapData, LayerVisibility } from '../types/map';
+import { ClimateOverlay, HexMapData, LayerVisibility, MapTheme } from '../types/map';
 
 interface SubBarProps {
   map: HexMapData;
   overlay: ClimateOverlay;
   onChangeOverlay: (o: ClimateOverlay) => void;
+  mapTheme: MapTheme;
+  onChangeMapTheme: (t: MapTheme) => void;
   layers: LayerVisibility;
   onToggleLayer: (key: keyof LayerVisibility) => void;
   showTimelineBar: boolean;
   onToggleTimelineBar: () => void;
   onOpenSizeModal: () => void;
   onOpenEconomyModal: () => void;
+  onOpenWorldbuildingModal: () => void;
+  onOpenHeightmapModal: () => void;
   onOpenCustomModal: () => void;
   onOpenExportModal: () => void;
 }
@@ -48,12 +54,16 @@ export const SubBar: React.FC<SubBarProps> = ({
   map,
   overlay,
   onChangeOverlay,
+  mapTheme,
+  onChangeMapTheme,
   layers,
   onToggleLayer,
   showTimelineBar,
   onToggleTimelineBar,
   onOpenSizeModal,
   onOpenEconomyModal,
+  onOpenWorldbuildingModal,
+  onOpenHeightmapModal,
   onOpenCustomModal,
   onOpenExportModal,
 }) => {
@@ -75,11 +85,14 @@ export const SubBar: React.FC<SubBarProps> = ({
   const dims = computeRealDimensions(map.width, map.height, map.hexSizeKm);
 
   const toggleItems: { key: keyof LayerVisibility; label: string }[] = [
+    { key: 'hillshade', label: 'แสงเงาภูเขา (3D)' },
+    { key: 'contours', label: 'เส้นชั้นความสูง' },
     { key: 'features', label: 'ลักษณะพิเศษ' },
     { key: 'borders', label: 'พรมแดนอาณาจักร' },
     { key: 'territories', label: 'สีดินแดน' },
     { key: 'religions', label: 'เขตศาสนา' },
     { key: 'cultures', label: 'เขตวัฒนธรรม' },
+    { key: 'campaigns', label: 'ลูกศรเดินทัพ' },
     { key: 'cityNames', label: 'ชื่อเมือง & ป้าย' },
     { key: 'routes', label: 'เส้นทาง & การค้า' },
     { key: 'rivers', label: 'แม่น้ำ' },
@@ -136,6 +149,22 @@ export const SubBar: React.FC<SubBarProps> = ({
               {m.label}
             </option>
           ))}
+        </select>
+
+        <select
+          value={mapTheme}
+          onChange={(e) => onChangeMapTheme(e.target.value as MapTheme)}
+          className={`px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition ${
+            mapTheme !== 'standard'
+              ? 'bg-amber-500/20 border-amber-400/60 text-amber-200 font-semibold'
+              : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
+          }`}
+          title="สไตล์แผนที่ (Map Theme)"
+        >
+          <option value="standard" className="bg-[#0f1620] text-slate-100">ธีม: มาตรฐาน</option>
+          <option value="parchment" className="bg-[#0f1620] text-slate-100">ธีม: กระดาษโบราณ (Parchment)</option>
+          <option value="atlas" className="bg-[#0f1620] text-slate-100">ธีม: ภูมิศาสตร์ (Atlas)</option>
+          <option value="dark" className="bg-[#0f1620] text-slate-100">ธีม: กลางคืน (VTT Dark)</option>
         </select>
 
         <div className="h-4 w-px bg-slate-800 mx-0.5 shrink-0" />
@@ -245,7 +274,26 @@ export const SubBar: React.FC<SubBarProps> = ({
           title="ปรับแต่งและสร้างภูมิประเทศ ไบโอม ลักษณะพิเศษ และ POI"
         >
           <Palette className="w-3 h-3 text-violet-400" />
-          <span>ปรับแต่งโลก</span>
+          <span className="hidden 2xl:inline">ปรับแต่งโลก</span>
+        </button>
+
+        <button
+          onClick={onOpenWorldbuildingModal}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          title="การทูตระหว่างรัฐ เส้นทางเดินทัพ สารานุกรม Wiki และส่งออก Lorebook"
+        >
+          <BookOpen className="w-3 h-3 text-amber-300" />
+          <span>การทูต & Wiki</span>
+        </button>
+
+        <button
+          onClick={onOpenHeightmapModal}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          title="นำเข้าภาพ Heightmap / ภาพร่างลอกลาย และเจาะแผนที่ภูมิภาค Sub-Map"
+        >
+          <Crop className="w-3 h-3 text-sky-400" />
+          <span className="hidden xl:inline">Heightmap / Sub-Map</span>
+          <span className="xl:hidden">Sub-Map</span>
         </button>
 
         <button

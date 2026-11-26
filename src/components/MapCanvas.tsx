@@ -13,6 +13,7 @@ import {
   Plus,
   Route,
   Sparkles,
+  Swords,
   Waves,
   Wind,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ import {
   getHexTerrain,
   hexDistance,
   hexIndex,
+  hexToPixel,
   inBounds,
   isWaterBiome,
   pixelToHex,
@@ -48,9 +50,11 @@ import {
   ClimateOverlay,
   HexCoord,
   HexMapData,
+  LabelSize,
   LabelStyle,
   LayerVisibility,
   PoiType,
+  ReferenceOverlayConfig,
   RoadType,
   TerrainId,
   ToolMode,
@@ -103,6 +107,21 @@ interface MapCanvasProps {
   onChangePoiType: (t: PoiType) => void;
   labelStyle: LabelStyle;
   onChangeLabelStyle: (s: LabelStyle) => void;
+  labelSize: LabelSize;
+  onChangeLabelSize: (s: LabelSize) => void;
+  labelRotation: number;
+  onChangeLabelRotation: (deg: number) => void;
+  labelCurve: number;
+  onChangeLabelCurve: (c: number) => void;
+  campaignSubTool: 'draw' | 'erase';
+  onChangeCampaignSubTool: (t: 'draw' | 'erase') => void;
+  campaignKingdomId: string;
+  onChangeCampaignKingdomId: (id: string) => void;
+  onAddCampaignPath: (hexes: HexCoord[]) => void;
+  onEraseCampaignNear: (q: number, r: number) => void;
+  referenceOverlay: ReferenceOverlayConfig | null;
+  onChangeReferenceOverlay: (cfg: ReferenceOverlayConfig | null) => void;
+  focusTarget: { q: number; r: number; zoom?: number; nonce: number } | null;
   climateOverlay: ClimateOverlay;
   layers: LayerVisibility;
   selectedCityId: string | null;
@@ -184,6 +203,21 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onChangePoiType,
     labelStyle,
     onChangeLabelStyle,
+    labelSize,
+    onChangeLabelSize,
+    labelRotation,
+    onChangeLabelRotation,
+    labelCurve,
+    onChangeLabelCurve,
+    campaignSubTool,
+    onChangeCampaignSubTool,
+    campaignKingdomId,
+    onChangeCampaignKingdomId,
+    onAddCampaignPath,
+    onEraseCampaignNear,
+    referenceOverlay,
+    onChangeReferenceOverlay,
+    focusTarget,
     climateOverlay,
     layers,
     selectedCityId,
@@ -263,6 +297,27 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const z = Math.max(0.14, Math.min(2.2, Math.min(zoomX, zoomY)));
     setCam({ x: mapWorldW / 2, y: mapWorldH / 2, zoom: z });
   }, [mapWorldH, mapWorldW]);
+
+  const [refImgEl, setRefImgEl] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!referenceOverlay?.imageDataUrl || !referenceOverlay.visible) {
+      setRefImgEl(null);
+      return;
+    }
+    const img = new window.Image();
+    img.onload = () => setRefImgEl(img);
+    img.src = referenceOverlay.imageDataUrl;
+  }, [referenceOverlay?.imageDataUrl, referenceOverlay?.visible]);
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    const pt = hexToPixel(focusTarget.q, focusTarget.r, BASE_HEX_RADIUS);
+    setCam((c) => ({
+      x: pt.x,
+      y: pt.y,
+      zoom: focusTarget.zoom ? Math.max(0.25, Math.min(3.5, focusTarget.zoom)) : c.zoom,
+    }));
+  }, [focusTarget]);
 
   const lastFittedIdRef = useRef('');
   useEffect(() => {
@@ -361,6 +416,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       draftPath,
       previewPath,
       measurePoints,
+      mapTheme: map.mapTheme ?? 'standard',
+      refImage: refImgEl,
+      refOpacity: referenceOverlay?.visible ? referenceOverlay.opacity : 0,
     });
     ctx.restore();
   }, [
@@ -373,6 +431,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     map,
     measurePoints,
     previewPath,
+    refImgEl,
+    referenceOverlay,
     renderVersion,
     selectedCityId,
     tool,
@@ -653,6 +713,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         const text = window.prompt('ใส่ชื่อสถานที่ / ชื่อภูมิภาคบนแผนที่:');
         if (text && text.trim()) onPlaceLabel(h.q, h.r, text.trim());
       }
+    } else if (tool === 'campaign') {
+      if (campaignSubTool === 'erase') {
+        onEraseCampaignNear(h.q, h.r);
+      } else {
+        isPaintingRef.current = true;
+        draftPathRef.current = [h];
+        setDraftPath([h]);
+      }
     } else if (tool === 'climate') {
       const nearCity = map.cities.find((c) => hexDistance(c, h) <= 1);
       if (nearCity) onPlaceOrSelectCityAt(h.q, h.r);
@@ -712,6 +780,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         draftPathRef.current = next;
         setDraftPath(next);
       }
+    } else if (tool === 'campaign' && campaignSubTool === 'draw') {
+      const cur = draftPathRef.current;
+      const last = cur[cur.length - 1];
+      if (!last || last.q !== h.q || last.r !== h.r) {
+        const next = [...cur, h];
+        draftPathRef.current = next;
+        setDraftPath(next);
+      }
     } else if (tool === 'road' && roadSubTool === 'manual') {
       const cur = draftPathRef.current;
       const last = cur[cur.length - 1];
@@ -762,6 +838,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         const pts = draftPathRef.current;
         if (pts.length >= 2) {
           onAddManualCurrent(pts);
+        }
+        draftPathRef.current = [];
+        setDraftPath([]);
+      } else if (tool === 'campaign' && campaignSubTool === 'draw') {
+        const pts = draftPathRef.current;
+        if (pts.length >= 2) {
+          onAddCampaignPath(pts);
         }
         draftPathRef.current = [];
         setDraftPath([]);
@@ -1312,16 +1395,80 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
                   ))}
                 </select>
               ) : (
-                <select
-                  value={labelStyle}
-                  onChange={(e) => onChangeLabelStyle(e.target.value as LabelStyle)}
-                  className="bg-[#17202c] border border-slate-700 rounded px-2 py-0.5 text-slate-200 outline-none"
-                >
-                  <option value="region">ชื่อแคว้น / ภูมิภาค</option>
-                  <option value="water">ชื่อทะเล / มหาสมุทร</option>
-                  <option value="mountain">ชื่อเทือกเขา</option>
-                </select>
+                <>
+                  <select
+                    value={labelStyle}
+                    onChange={(e) => onChangeLabelStyle(e.target.value as LabelStyle)}
+                    className="bg-[#17202c] border border-slate-700 rounded px-2 py-0.5 text-slate-200 outline-none"
+                  >
+                    <option value="region">ชื่อแคว้น / ภูมิภาค</option>
+                    <option value="water">ชื่อทะเล / มหาสมุทร</option>
+                    <option value="mountain">ชื่อเทือกเขา</option>
+                  </select>
+                  <select
+                    value={labelSize}
+                    onChange={(e) => onChangeLabelSize(e.target.value as LabelSize)}
+                    className="bg-[#17202c] border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 outline-none"
+                    title="ขนาดตัวอักษร"
+                  >
+                    <option value="sm">เล็ก</option>
+                    <option value="md">กลาง</option>
+                    <option value="lg">ใหญ่</option>
+                  </select>
+                  <span className="text-slate-400">เอียง: {labelRotation}°</span>
+                  <input
+                    type="range"
+                    min={-75}
+                    max={75}
+                    step={5}
+                    value={labelRotation}
+                    onChange={(e) => onChangeLabelRotation(Number(e.target.value))}
+                    className="w-14"
+                  />
+                  <span className="text-slate-400">โค้ง: {labelCurve.toFixed(1)}</span>
+                  <input
+                    type="range"
+                    min={-1}
+                    max={1}
+                    step={0.1}
+                    value={labelCurve}
+                    onChange={(e) => onChangeLabelCurve(Number(e.target.value))}
+                    className="w-14"
+                  />
+                </>
               )}
+            </>
+          )}
+
+          {tool === 'campaign' && (
+            <>
+              <button
+                onClick={() => onChangeCampaignSubTool('draw')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  campaignSubTool === 'draw' ? 'bg-rose-500/25 text-rose-200' : 'text-slate-400'
+                }`}
+              >
+                <Swords className="w-3.5 h-3.5" /> ลากเส้นเดินทัพ
+              </button>
+              <button
+                onClick={() => onChangeCampaignSubTool('erase')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  campaignSubTool === 'erase' ? 'bg-rose-500/25 text-rose-200' : 'text-slate-400'
+                }`}
+              >
+                <Eraser className="w-3.5 h-3.5" /> ลบทัพ
+              </button>
+              <select
+                value={campaignKingdomId}
+                onChange={(e) => onChangeCampaignKingdomId(e.target.value)}
+                className="bg-[#17202c] border border-slate-700 rounded px-2 py-0.5 text-slate-200 outline-none"
+              >
+                {map.kingdoms.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    ฝ่าย: {k.name}
+                  </option>
+                ))}
+              </select>
             </>
           )}
 
@@ -1370,6 +1517,32 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           <Maximize2 className="w-4 h-4" />
         </button>
       </div>
+
+      {referenceOverlay?.visible && (
+        <div className="absolute top-14 left-3 bg-[#111720]/92 border border-sky-500/50 rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-[11px] text-slate-200 shadow-xl">
+          <span className="text-sky-300 font-medium">ภาพลอกลาย:</span>
+          <input
+            type="range"
+            min={0.1}
+            max={0.9}
+            step={0.05}
+            value={referenceOverlay.opacity}
+            onChange={(e) =>
+              onChangeReferenceOverlay({
+                ...referenceOverlay,
+                opacity: Number(e.target.value),
+              })
+            }
+            className="w-20"
+          />
+          <button
+            onClick={() => onChangeReferenceOverlay(null)}
+            className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/35 cursor-pointer"
+          >
+            ปิดภาพร่าง
+          </button>
+        </div>
+      )}
 
       {/* Bottom-Left Scale Bar + Elevation Ramp Legend */}
       <div className="absolute bottom-3 left-3 flex flex-col gap-1.5 pointer-events-none">
