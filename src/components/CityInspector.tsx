@@ -1,6 +1,8 @@
 import React from 'react';
-import { Building2, Sparkles, Store, Trash2, X } from 'lucide-react';
+import { Building2, Dices, Sparkles, Store, Trash2, X } from 'lucide-react';
 import { CITY_TIERS } from '../data/goods';
+import { hexIndex } from '../engine/hexMath';
+import { generateCultureName } from '../engine/nameGenerator';
 import { autoSuggestGoodsForCity } from '../engine/worldGenerator';
 import { City, CityTier, HexMapData } from '../types/map';
 
@@ -58,7 +60,22 @@ export const CityInspector: React.FC<CityInspectorProps> = ({
 
       <div className="space-y-2">
         <div>
-          <label className="block text-[11px] text-slate-400 mb-1">ชื่อเมือง</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-[11px] text-slate-400">ชื่อเมือง</label>
+            <button
+              type="button"
+              onClick={() => {
+                const cid = city.cultureId || map.cultures?.[hexIndex(city.q, city.r, map.width)] || '';
+                const culture = (map.cultureList ?? []).find((c) => c.id === cid) ?? null;
+                onUpdate({ name: generateCultureName(culture, 'city') });
+              }}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#182332] hover:bg-[#223044] border border-slate-700 text-[10px] text-amber-300 cursor-pointer"
+              title="สุ่มชื่อเมืองตามภาษาของวัฒนธรรม"
+            >
+              <Dices className="w-3 h-3" />
+              สุ่มตามวัฒนธรรม
+            </button>
+          </div>
           <input
             value={city.name}
             onChange={(e) => onUpdate({ name: e.target.value })}

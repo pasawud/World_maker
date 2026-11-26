@@ -192,6 +192,17 @@ export type CultureType =
   | 'martial'
   | (string & {});
 
+export interface CultureLanguageProfile {
+  presetId?: string;
+  onsets: string[];
+  nuclei: string[];
+  codas: string[];
+  citySuffixes: string[];
+  riverSuffixes: string[];
+  seaSuffixes: string[];
+  personSuffixes: string[];
+}
+
 export interface CultureDetails {
   architectureStyle: string;
   languageFamily: string;
@@ -199,6 +210,7 @@ export interface CultureDetails {
   traditions: string[];
   values: string[];
   clothingStyle?: string;
+  languageProfile?: CultureLanguageProfile;
 }
 
 export interface Culture {
@@ -247,6 +259,8 @@ export interface GeographyConfig {
   oceanCurrents?: boolean;
   currentStrength?: number; // 0.2 .. 2.0, default 1.0
   coriolisDirection?: 'normal' | 'reversed';
+  tectonicPlates?: number; // 4..16, default 8
+  tectonicStrength?: number; // 0..1.5, default 0 for legacy parity, >0 enables plate boundary mountains/rifts
 }
 
 export interface HexCoord {
@@ -583,6 +597,31 @@ export interface WorldTimeline {
   events: TimelineEvent[];
 }
 
+export type SeasonId = 'spring' | 'summer' | 'autumn' | 'winter';
+
+export interface CalendarMonth {
+  id: string;
+  name: string;
+  days: number;
+  season: SeasonId;
+}
+
+export interface WorldMoon {
+  id: string;
+  name: string;
+  cycleDays: number;
+  color: string;
+}
+
+export interface WorldCalendar {
+  name: string;
+  year: number;
+  monthIdx: number; // 0-based
+  day: number; // 1-based
+  months: CalendarMonth[];
+  moons: WorldMoon[];
+}
+
 export interface HexMapData {
   version: 1;
   id: string;
@@ -618,6 +657,7 @@ export interface HexMapData {
   customReligionTypes?: CustomCategoryType[];
   customCultureTypes?: CustomCategoryType[];
   timeline?: WorldTimeline;
+  calendar?: WorldCalendar;
   mapTheme?: MapTheme;
   diplomacy?: DiplomaticRelation[];
   campaigns?: MilitaryCampaign[];
@@ -640,6 +680,7 @@ export type ToolMode =
   | 'religion'
   | 'culture'
   | 'campaign'
+  | 'submap'
   | 'road'
   | 'trade'
   | 'measure'
@@ -656,7 +697,8 @@ export type ClimateOverlay =
   | 'elevation'
   | 'temperature'
   | 'moisture'
-  | 'currents';
+  | 'currents'
+  | 'tectonics';
 
 export interface LayerVisibility {
   grid: boolean;
@@ -665,6 +707,8 @@ export interface LayerVisibility {
   hillshade?: boolean;
   contours?: boolean;
   campaigns?: boolean;
+  tectonics?: boolean;
+  chokepoints?: boolean;
   cityNames: boolean;
   labels: boolean;
   territories: boolean;
@@ -675,6 +719,13 @@ export interface LayerVisibility {
   routes: boolean;
   rivers: boolean;
   pois: boolean;
+}
+
+export interface SubMapBounds {
+  minQ: number;
+  maxQ: number;
+  minR: number;
+  maxR: number;
 }
 
 export type TravelSpeedId = 'foot' | 'caravan' | 'horse' | 'ship';

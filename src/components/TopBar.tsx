@@ -3,6 +3,7 @@ import {
   Building2,
   CloudSun,
   Compass,
+  Crop,
   Crown,
   Flame,
   FolderOpen,
@@ -69,6 +70,7 @@ const TOOL_GROUPS: {
     { id: 'trade', label: 'การค้า', icon: <Store className="w-3.5 h-3.5" />, shortcut: '8' },
     { id: 'measure', label: 'วัดระยะ', icon: <Ruler className="w-3.5 h-3.5" />, shortcut: '9' },
     { id: 'poi', label: 'จุดสำคัญ', icon: <MapPin className="w-3.5 h-3.5" />, shortcut: '0' },
+    { id: 'submap', label: 'เจาะโซน', icon: <Crop className="w-3.5 h-3.5" />, shortcut: '' },
   ],
 ];
 

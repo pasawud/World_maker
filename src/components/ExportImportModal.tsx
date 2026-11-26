@@ -11,12 +11,13 @@ import {
   saveMapToLibrary,
   serializeMapToJson,
 } from '../engine/serialization';
-import { ClimateOverlay, HexMapData, LayerVisibility } from '../types/map';
+import { ClimateOverlay, HexMapData, LayerVisibility, SeasonId } from '../types/map';
 
 interface ExportImportModalProps {
   map: HexMapData;
   overlay: ClimateOverlay;
   layers: LayerVisibility;
+  activeSeason?: SeasonId | null;
   onImportMap: (m: HexMapData) => void;
   onClose: () => void;
 }
@@ -25,6 +26,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   map,
   overlay,
   layers,
+  activeSeason = null,
   onImportMap,
   onClose,
 }) => {
@@ -69,6 +71,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
       includeLegend,
       includeScale,
       mapTheme: map.mapTheme ?? 'standard',
+      activeSeason,
     });
     const a = document.createElement('a');
     a.href = dataUrl;

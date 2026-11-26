@@ -1,15 +1,22 @@
 import React, { useMemo, useState } from 'react';
 import {
   BookOpen,
+  Coins,
+  Compass,
+  Dices,
   Download,
   FileText,
   Handshake,
   MapPin,
   Plus,
+  Shield,
   Swords,
   Trash2,
+  Wheat,
   X,
 } from 'lucide-react';
+import { generateCultureName } from '../engine/nameGenerator';
+import { computeRealmEconomics, detectStrategicChokepoints } from '../engine/strategy';
 import {
   collectMentionTargets,
   DIPLOMACY_STATUS_META,
@@ -28,7 +35,7 @@ import {
   WikiEntry,
 } from '../types/map';
 
-export type WorldbuildingTab = 'diplomacy' | 'campaigns' | 'wiki';
+export type WorldbuildingTab = 'diplomacy' | 'campaigns' | 'wiki' | 'strategy';
 
 interface WorldbuildingModalProps {
   map: HexMapData;
@@ -82,6 +89,8 @@ export const WorldbuildingModal: React.FC<WorldbuildingModalProps> = ({
   const [editingWikiId, setEditingWikiId] = useState<string | null>(null);
 
   const mentionTargets = useMemo(() => collectMentionTargets(map), [map]);
+  const realmEconomics = useMemo(() => computeRealmEconomics(map), [map]);
+  const chokepoints = useMemo(() => detectStrategicChokepoints(map, 24), [map]);
   const selectedWiki = wikiList.find((w) => w.id === selectedWikiId) ?? null;
 
   const startNewWiki = () => {
@@ -196,10 +205,11 @@ export const WorldbuildingModal: React.FC<WorldbuildingModalProps> = ({
           </div>
         </div>
 
-        <div className="px-4 pt-2 border-b border-slate-800 flex gap-3 text-xs">
+        <div className="px-4 pt-2 border-b border-slate-800 flex flex-wrap gap-3 text-xs">
           {[
             { id: 'diplomacy' as const, label: 'เมทริกซ์การทูต (Diplomacy)', icon: <Handshake className="w-3.5 h-3.5" /> },
             { id: 'campaigns' as const, label: `สงคราม & ยุทธการ (${(map.campaigns ?? []).length})`, icon: <Swords className="w-3.5 h-3.5" /> },
+            { id: 'strategy' as const, label: `เศรษฐกิจ & ยุทธศาสตร์ (${chokepoints.length})`, icon: <Coins className="w-3.5 h-3.5" /> },
             { id: 'wiki' as const, label: `สารานุกรมโลก (${wikiList.length})`, icon: <BookOpen className="w-3.5 h-3.5" /> },
           ].map((t) => (
             <button
@@ -540,6 +550,20 @@ export const WorldbuildingModal: React.FC<WorldbuildingModalProps> = ({
                         <span className="text-[11px] text-slate-400">
                           เนื้อหา (พิมพ์ <code className="text-amber-300">@ชื่อเมือง/อาณาจักร</code> เพื่อเชื่อมลิงก์ไปยังแผนที่)
                         </span>
+                        {(map.cultureList ?? []).length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cult = (map.cultureList ?? [])[0] ?? null;
+                              const nm = generateCultureName(cult, 'person');
+                              setWikiContent((c) => `${c}${c && !c.endsWith(' ') ? ' ' : ''}${nm}`);
+                            }}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#182332] hover:bg-[#223044] border border-slate-700 text-[10px] text-amber-300 cursor-pointer"
+                            title="แทรกชื่อสุ่มตามวัฒนธรรมหลัก"
+                          >
+                            <Dices className="w-3 h-3" /> สุ่มชื่อตัวละคร
+                          </button>
+                        )}
                       </div>
                       {mentionTargets.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-1.5">
@@ -697,6 +721,180 @@ export const WorldbuildingModal: React.FC<WorldbuildingModalProps> = ({
                 ) : (
                   <div className="text-center py-12 text-slate-500">
                     เลือกบทความทางซ้ายหรือคลิก "เขียนบทความใหม่" เพื่อเริ่มต้นสารานุกรมโลก
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 4. REALM ECONOMICS, MILITARY & STRATEGIC CHOKEPOINTS */}
+          {tab === 'strategy' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                    <Coins className="w-3.5 h-3.5 text-amber-400" /> รายได้ภาษีรวมทุกอาณาจักร
+                  </div>
+                  <div className="text-lg font-bold text-amber-300 mt-1">
+                    {realmEconomics
+                      .reduce((s, r) => s + r.totalTreasuryIncome, 0)
+                      .toLocaleString()}{' '}
+                    <span className="text-xs font-normal text-slate-400">Gold / ฤดู</span>
+                  </div>
+                </div>
+                <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-rose-400" /> กำลังพลประจำการรวม
+                  </div>
+                  <div className="text-lg font-bold text-rose-300 mt-1">
+                    {realmEconomics
+                      .reduce((s, r) => s + r.standingArmy, 0)
+                      .toLocaleString()}{' '}
+                    <span className="text-xs font-normal text-slate-400">นาย</span>
+                  </div>
+                </div>
+                <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-cyan-400" /> จุดคอขวดทางยุทธศาสตร์ที่พบ
+                  </div>
+                  <div className="text-lg font-bold text-cyan-300 mt-1">
+                    {chokepoints.length} <span className="text-xs font-normal text-slate-400">ตำแหน่ง</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Realm Economics & Military Table */}
+              <div className="bg-[#0f1620] border border-slate-800 rounded-lg overflow-hidden">
+                <div className="px-3 py-2 border-b border-slate-800 font-semibold text-amber-300 flex items-center gap-1.5">
+                  <Wheat className="w-3.5 h-3.5" /> เศรษฐกิจ กำลังทหาร และความมั่นคงทางอาหารรายอาณาจักร
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-[11px]">
+                    <thead>
+                      <tr className="bg-[#131d2a] text-slate-400 border-b border-slate-800">
+                        <th className="py-2 px-3">อาณาจักร</th>
+                        <th className="py-2 px-2 text-right">พื้นที่ (ช่อง)</th>
+                        <th className="py-2 px-2 text-right">ประชากรรวม</th>
+                        <th className="py-2 px-2 text-right">ภาษี/ฤดู</th>
+                        <th className="py-2 px-2 text-right">กำลังพล (สำรอง)</th>
+                        <th className="py-2 px-2 text-right">อาหาร (ผลิต/ใช้)</th>
+                        <th className="py-2 px-3 text-center">ความมั่นคงอาหาร</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {realmEconomics.map((stat) => {
+                        const secLabel =
+                          stat.foodBalancePct >= 115
+                            ? 'มั่นคง'
+                            : stat.foodBalancePct >= 90
+                            ? 'สมดุล'
+                            : 'ขาดแคลน';
+                        return (
+                          <tr key={stat.kingdomId} className="border-b border-slate-800/70 hover:bg-[#16202e]">
+                            <td className="py-2 px-3 font-semibold text-slate-100 flex items-center gap-2">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: stat.color }}
+                              />
+                              <span>{stat.kingdomName}</span>
+                              <span className="text-[10px] text-slate-500">({stat.cityCount} เมือง)</span>
+                            </td>
+                            <td className="py-2 px-2 text-right text-slate-300">{stat.hexCount}</td>
+                            <td className="py-2 px-2 text-right text-slate-200">
+                              {stat.population.toLocaleString()}
+                            </td>
+                            <td className="py-2 px-2 text-right text-amber-300 font-semibold">
+                              +{stat.totalTreasuryIncome.toLocaleString()}g
+                            </td>
+                            <td className="py-2 px-2 text-right text-rose-300">
+                              {stat.standingArmy.toLocaleString()}{' '}
+                              <span className="text-slate-500">({stat.maxLevy.toLocaleString()})</span>
+                            </td>
+                            <td className="py-2 px-2 text-right text-slate-300">
+                              {stat.foodSupply.toLocaleString()} / {stat.foodDemand.toLocaleString()}
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded border text-[10px] ${
+                                  stat.foodBalancePct >= 115
+                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                                    : stat.foodBalancePct >= 90
+                                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                                    : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                                }`}
+                              >
+                                {secLabel} ({stat.foodBalancePct}%)
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Strategic Chokepoints List */}
+              <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-cyan-300 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    จุดคอขวดและช่องเขาสำคัญทางยุทธศาสตร์ (คลิกเพื่อซูมไปยังพิกัด)
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    เปิด/ปิดหมุดบนแผนที่ได้จากเมนู "ชั้นข้อมูล → จุดยุทธศาสตร์"
+                  </span>
+                </div>
+                {chokepoints.length === 0 ? (
+                  <div className="text-slate-500 py-4 text-center">
+                    ยังไม่มีช่องเขา คอคอด หรือช่องแคบที่โดดเด่นบนแผนที่นี้
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                    {chokepoints.map((cp, idx) => {
+                      const ownerId = map.territories?.[cp.r * map.width + cp.q];
+                      const owner = ownerId ? map.kingdoms.find((k) => k.id === ownerId) : undefined;
+                      const kindLabel =
+                        cp.kind === 'mountain_pass'
+                          ? '⛰️ ช่องเขา (Mountain Pass)'
+                          : cp.kind === 'isthmus'
+                          ? '🌉 คอคอดแผ่นดิน (Isthmus)'
+                          : '⚓ ช่องแคบทางน้ำ (Strait)';
+                      return (
+                        <div
+                          key={`${cp.q}_${cp.r}_${idx}`}
+                          className="flex items-center justify-between gap-2 p-2 rounded bg-[#151e2b] border border-slate-800"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-100 truncate">{kindLabel}</div>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                              <span>
+                                พิกัด ({cp.q}, {cp.r})
+                              </span>
+                              <span>· ความสำคัญ {cp.score}</span>
+                              {owner && (
+                                <span className="inline-flex items-center gap-1 text-amber-200">
+                                  <span
+                                    className="w-2 h-2 rounded-full"
+                                    style={{ backgroundColor: owner.color }}
+                                  />
+                                  {owner.name}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              onJumpToCoord(cp.q, cp.r, 1.35);
+                              onClose();
+                            }}
+                            className="shrink-0 px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-[11px] cursor-pointer"
+                          >
+                            ไปยังจุดนี้
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

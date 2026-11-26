@@ -4,6 +4,7 @@ import { getFeatureMetaWithCustom } from '../data/features';
 import { CITY_TIERS } from '../data/goods';
 import { getTerrainMetaWithCustom } from '../data/terrains';
 import { autoDetectCliffsFromElevation, syncShallowWater } from '../engine/cliffs';
+import { createDefaultCalendar } from '../engine/calendar';
 import {
   applySmoothTerrainElevation,
   sculptElevationBrush,
@@ -65,9 +66,12 @@ import {
   ReferenceOverlayConfig,
   Religion,
   RoadType,
+  SeasonId,
   SpecialFeatureMeta,
+  SubMapBounds,
   TerrainId,
   ToolMode,
+  WorldCalendar,
   TradeMode,
   TravelSpeedId,
   WikiEntry,
@@ -126,6 +130,8 @@ export function useMapEditor() {
   const [measureMode, setMeasureMode] = useState<'straight' | 'terrain'>('terrain');
   const [travelSpeed, setTravelSpeed] = useState<TravelSpeedId>('caravan');
   const [showMinimap, setShowMinimap] = useState<boolean>(true);
+  const [activeSeason, setActiveSeason] = useState<SeasonId | null>(null);
+  const [pendingSubMapBounds, setPendingSubMapBounds] = useState<SubMapBounds | null>(null);
 
   const [activeKingdomId, setActiveKingdomId] = useState<string>(
     () => map.kingdoms[0]?.id ?? 'north'
@@ -157,6 +163,8 @@ export function useMapEditor() {
     routes: true,
     rivers: true,
     pois: true,
+    tectonics: false,
+    chokepoints: false,
   });
 
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
@@ -1957,6 +1965,19 @@ export function useMapEditor() {
     setFocusTarget((prev) => ({ q, r, zoom, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
 
+  const updateCalendar = useCallback(
+    (calendar: WorldCalendar) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          calendar: calendar ?? createDefaultCalendar(),
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
   return {
     map,
     setMap,
@@ -2126,5 +2147,10 @@ export function useMapEditor() {
     deleteBookmark,
     updateMapLabel,
     deleteMapLabel,
+    activeSeason,
+    setActiveSeason,
+    pendingSubMapBounds,
+    setPendingSubMapBounds,
+    updateCalendar,
   };
 }

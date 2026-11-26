@@ -32,6 +32,11 @@ import {
   generateTerritoriesFromCities,
 } from './politics';
 import { generateRealEarthElevationField } from './realEarth';
+import {
+  applyTectonicFeatures,
+  applyTectonicsToElevation,
+  computeTectonicField,
+} from './tectonics';
 
 export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   seed: 42081,
@@ -48,6 +53,8 @@ export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   oceanCurrents: true,
   currentStrength: 1.0,
   coriolisDirection: 'normal',
+  tectonicPlates: 8,
+  tectonicStrength: 0,
 };
 
 /** Compute latitude in degrees for row r between latNorth (top) and latSouth (bottom). */
@@ -225,6 +232,22 @@ export function generateElevationField(
 
       elev[hexIndex(q, r, width)] = Math.max(-1, Math.min(1, h));
     }
+  }
+
+  if ((config.tectonicStrength ?? 0) > 0) {
+    const field = computeTectonicField(
+      width,
+      height,
+      config.seed,
+      config.tectonicPlates ?? 8
+    );
+    return applyTectonicsToElevation(
+      elev,
+      width,
+      height,
+      field,
+      config.tectonicStrength
+    );
   }
 
   return elev;
@@ -724,7 +747,7 @@ export function generateWorld(
     terrains
   );
 
-  const rawFeatures = generateSpecialFeatures(
+  const baseFeatures = generateSpecialFeatures(
     width,
     height,
     biomes,
@@ -735,6 +758,17 @@ export function generateWorld(
     config.seed,
     terrains
   );
+  const rawFeatures =
+    (config.tectonicStrength ?? 0) > 0 && config.landmassType !== 'real_earth'
+      ? applyTectonicFeatures(
+          baseFeatures,
+          width,
+          height,
+          elevation,
+          computeTectonicField(width, height, config.seed, config.tectonicPlates ?? 8),
+          config.seed
+        )
+      : baseFeatures;
 
   const cliffRes = generateNaturalCliffs(
     width,

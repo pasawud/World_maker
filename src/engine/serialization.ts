@@ -253,6 +253,12 @@ export function parseMapFromJson(raw: string): HexMapData {
         ? Math.max(0.2, Math.min(2.0, Number(geoRaw.currentStrength)))
         : 1.0,
       coriolisDirection: geoRaw.coriolisDirection === 'reversed' ? 'reversed' : 'normal',
+      tectonicPlates: Number.isFinite(Number(geoRaw.tectonicPlates))
+        ? Math.max(4, Math.min(16, Math.round(Number(geoRaw.tectonicPlates))))
+        : 8,
+      tectonicStrength: Number.isFinite(Number(geoRaw.tectonicStrength))
+        ? Math.max(0, Math.min(1.5, Number(geoRaw.tectonicStrength)))
+        : 0,
     },
     terrains,
     biomes,
@@ -335,6 +341,12 @@ export function parseMapFromJson(raw: string): HexMapData {
     bookmarks: Array.isArray(obj.bookmarks)
       ? (obj.bookmarks as HexMapData['bookmarks'])
       : [],
+    calendar:
+      obj.calendar &&
+      typeof obj.calendar === 'object' &&
+      Array.isArray((obj.calendar as HexMapData['calendar'])?.months)
+        ? (obj.calendar as HexMapData['calendar'])
+        : undefined,
     roads,
     tradeRoutes: Array.isArray(obj.tradeRoutes) ? (obj.tradeRoutes as HexMapData['tradeRoutes']) : [],
     pois: Array.isArray(obj.pois) ? (obj.pois as HexMapData['pois']) : [],
@@ -378,6 +390,7 @@ export function resizeMap(
       campaigns: [],
       wikiEntries: map.wikiEntries ?? [],
       bookmarks: [],
+      calendar: map.calendar,
     };
   }
 

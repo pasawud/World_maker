@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CalendarModal } from './components/CalendarModal';
 import { CityBlueprintModal } from './components/CityBlueprintModal';
 import { CityTradeModal } from './components/CityTradeModal';
 import { CustomAssetsModal, CustomStudioTab } from './components/CustomAssetsModal';
@@ -38,6 +39,7 @@ export function App() {
   const [showTimelineModal, setShowTimelineModal] = useState(false);
   const [showWorldbuildingModal, setShowWorldbuildingModal] = useState(false);
   const [showHeightmapModal, setShowHeightmapModal] = useState(false);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -166,6 +168,8 @@ export function App() {
         onChangeOverlay={editor.setClimateOverlay}
         mapTheme={editor.map.mapTheme ?? 'standard'}
         onChangeMapTheme={editor.setMapTheme}
+        activeSeason={editor.activeSeason}
+        onChangeActiveSeason={editor.setActiveSeason}
         layers={editor.layers}
         onToggleLayer={editor.toggleLayer}
         showTimelineBar={showTimelineBar}
@@ -177,6 +181,7 @@ export function App() {
         onOpenEconomyModal={() => setShowEconomyModal(true)}
         onOpenWorldbuildingModal={() => setShowWorldbuildingModal(true)}
         onOpenHeightmapModal={() => setShowHeightmapModal(true)}
+        onOpenCalendarModal={() => setShowCalendarModal(true)}
         onOpenCustomModal={() => setCustomModalTab('terrains')}
         onOpenExportModal={() => setShowExportModal(true)}
       />
@@ -286,7 +291,13 @@ export function App() {
           onChangeReferenceOverlay={editor.setReferenceOverlay}
           focusTarget={editor.focusTarget}
           climateOverlay={editor.climateOverlay}
+          activeSeason={editor.activeSeason}
           layers={editor.layers}
+          onSelectSubMapZone={(bounds) => {
+            editor.setPendingSubMapBounds(bounds);
+            setShowHeightmapModal(true);
+            editor.setTool('view');
+          }}
           selectedCityId={editor.selectedCityId}
           tradeStartCityId={editor.tradeStartCityId}
           measurePoints={editor.measurePoints}
@@ -718,6 +729,7 @@ export function App() {
           map={editor.map}
           overlay={editor.climateOverlay}
           layers={editor.layers}
+          activeSeason={editor.activeSeason}
           onImportMap={(m) => {
             editor.loadImportedMap(m);
             showToast(`โหลดแผนที่ "${m.name}" เรียบร้อยแล้ว`);
@@ -748,11 +760,31 @@ export function App() {
       {showHeightmapModal && (
         <HeightmapSubMapModal
           map={editor.map}
+          initialTab={editor.pendingSubMapBounds ? 'submap' : 'heightmap'}
+          initialBounds={editor.pendingSubMapBounds}
           referenceOverlay={editor.referenceOverlay}
           onChangeReferenceOverlay={editor.setReferenceOverlay}
           onReplaceMap={(nextMap) => editor.loadImportedMap(nextMap)}
+          onStartCanvasSelectZone={() => {
+            editor.setPendingSubMapBounds(null);
+            editor.setTool('submap');
+            showToast('ลากกรอบสี่เหลี่ยมบนแผนที่เพื่อเลือกโซนเจาะ Sub-Map');
+          }}
           onNotify={showToast}
-          onClose={() => setShowHeightmapModal(false)}
+          onClose={() => {
+            setShowHeightmapModal(false);
+            editor.setPendingSubMapBounds(null);
+          }}
+        />
+      )}
+
+      {showCalendarModal && (
+        <CalendarModal
+          map={editor.map}
+          activeSeason={editor.activeSeason}
+          onChangeSeason={editor.setActiveSeason}
+          onUpdateCalendar={editor.updateCalendar}
+          onClose={() => setShowCalendarModal(false)}
         />
       )}
 

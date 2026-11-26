@@ -1,4 +1,5 @@
-import { BiomeId, GeographyConfig, HexMapData, TerrainId } from '../types/map';
+import { BiomeId, GeographyConfig, HexMapData, SubMapBounds, TerrainId } from '../types/map';
+export type { SubMapBounds };
 import { syncShallowWater } from './cliffs';
 import { terrainFromElevation } from './elevation';
 import { getHexTerrain, hexIndex, isWaterBiome } from './hexMath';
@@ -11,11 +12,51 @@ import {
   simulateClimate,
 } from './worldGenerator';
 
-export interface SubMapBounds {
-  minQ: number;
-  maxQ: number;
-  minR: number;
-  maxR: number;
+/** Compute bounding box containing a kingdom's territories or cities, padded cleanly for regional zoom. */
+export function computeKingdomBounds(
+  map: HexMapData,
+  kingdomId: string,
+  padding = 4
+): SubMapBounds {
+  let minQ = map.width;
+  let maxQ = -1;
+  let minR = map.height;
+  let maxR = -1;
+
+  for (let r = 0; r < map.height; r++) {
+    for (let q = 0; q < map.width; q++) {
+      if (map.territories?.[hexIndex(q, r, map.width)] === kingdomId) {
+        if (q < minQ) minQ = q;
+        if (q > maxQ) maxQ = q;
+        if (r < minR) minR = r;
+        if (r > maxR) maxR = r;
+      }
+    }
+  }
+  for (const c of map.cities) {
+    if (c.kingdomId === kingdomId) {
+      if (c.q < minQ) minQ = c.q;
+      if (c.q > maxQ) maxQ = c.q;
+      if (c.r < minR) minR = c.r;
+      if (c.r > maxR) maxR = c.r;
+    }
+  }
+
+  if (maxQ < minQ || maxR < minR) {
+    return {
+      minQ: Math.floor(map.width * 0.25),
+      maxQ: Math.floor(map.width * 0.75),
+      minR: Math.floor(map.height * 0.25),
+      maxR: Math.floor(map.height * 0.75),
+    };
+  }
+
+  return {
+    minQ: Math.max(0, minQ - padding),
+    maxQ: Math.min(map.width - 1, maxQ + padding),
+    minR: Math.max(0, minR - padding),
+    maxR: Math.min(map.height - 1, maxR + padding),
+  };
 }
 
 /**
@@ -25,7 +66,7 @@ export interface SubMapBounds {
 export function extractRegionalSubMap(
   sourceMap: HexMapData,
   bounds: SubMapBounds,
-  scaleFactor: 2 | 3 | 4 = 2,
+  scaleFactor: 2 | 3 | 4 | 6 = 2,
   subMapName?: string
 ): HexMapData {
   const minQ = Math.max(0, Math.min(sourceMap.width - 2, Math.floor(bounds.minQ)));
@@ -35,8 +76,8 @@ export function extractRegionalSubMap(
 
   const srcSpanW = maxQ - minQ + 1;
   const srcSpanH = maxR - minR + 1;
-  const outW = Math.max(20, Math.min(280, srcSpanW * scaleFactor));
-  const outH = Math.max(20, Math.min(220, srcSpanH * scaleFactor));
+  const outW = Math.max(20, Math.min(320, srcSpanW * scaleFactor));
+  const outH = Math.max(20, Math.min(240, srcSpanH * scaleFactor));
   const outHexKm = Number(Math.max(0.5, sourceMap.hexSizeKm / scaleFactor).toFixed(2));
   const total = outW * outH;
 

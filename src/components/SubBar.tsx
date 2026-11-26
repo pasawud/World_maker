@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
+  Calendar,
   ChevronDown,
   Clock,
   Crop,
@@ -13,8 +14,9 @@ import {
   Scale,
   Users,
 } from 'lucide-react';
+import { SEASON_LABELS_TH } from '../engine/calendar';
 import { computeRealDimensions } from '../engine/hexMath';
-import { ClimateOverlay, HexMapData, LayerVisibility, MapTheme } from '../types/map';
+import { ClimateOverlay, HexMapData, LayerVisibility, MapTheme, SeasonId } from '../types/map';
 
 interface SubBarProps {
   map: HexMapData;
@@ -22,6 +24,8 @@ interface SubBarProps {
   onChangeOverlay: (o: ClimateOverlay) => void;
   mapTheme: MapTheme;
   onChangeMapTheme: (t: MapTheme) => void;
+  activeSeason: SeasonId | null;
+  onChangeActiveSeason: (s: SeasonId | null) => void;
   layers: LayerVisibility;
   onToggleLayer: (key: keyof LayerVisibility) => void;
   showTimelineBar: boolean;
@@ -30,6 +34,7 @@ interface SubBarProps {
   onOpenEconomyModal: () => void;
   onOpenWorldbuildingModal: () => void;
   onOpenHeightmapModal: () => void;
+  onOpenCalendarModal: () => void;
   onOpenCustomModal: () => void;
   onOpenExportModal: () => void;
 }
@@ -48,6 +53,7 @@ const ANALYTIC_VIEWS: { id: ClimateOverlay; label: string }[] = [
   { id: 'temperature', label: 'อุณหภูมิ' },
   { id: 'moisture', label: 'ความชื้น / ฝน' },
   { id: 'currents', label: 'กระแสน้ำมหาสมุทร' },
+  { id: 'tectonics', label: 'แผ่นเปลือกโลก (Tectonics)' },
 ];
 
 export const SubBar: React.FC<SubBarProps> = ({
@@ -56,6 +62,8 @@ export const SubBar: React.FC<SubBarProps> = ({
   onChangeOverlay,
   mapTheme,
   onChangeMapTheme,
+  activeSeason,
+  onChangeActiveSeason,
   layers,
   onToggleLayer,
   showTimelineBar,
@@ -64,6 +72,7 @@ export const SubBar: React.FC<SubBarProps> = ({
   onOpenEconomyModal,
   onOpenWorldbuildingModal,
   onOpenHeightmapModal,
+  onOpenCalendarModal,
   onOpenCustomModal,
   onOpenExportModal,
 }) => {
@@ -99,6 +108,8 @@ export const SubBar: React.FC<SubBarProps> = ({
     { key: 'pois', label: 'จุดสำคัญ (POI)' },
     { key: 'graticule', label: 'เส้นพิกัดโลก' },
     { key: 'currents', label: 'กระแสน้ำมหาสมุทร' },
+    { key: 'tectonics', label: 'ขอบแผ่นเปลือกโลก' },
+    { key: 'chokepoints', label: 'จุดยุทธศาสตร์ (คอขวด)' },
   ];
 
   const activeLayerCount = toggleItems.filter((item) => layers[item.key]).length;
@@ -235,6 +246,28 @@ export const SubBar: React.FC<SubBarProps> = ({
           <Grid3X3 className="w-3 h-3" />
           <span>กริด</span>
         </button>
+
+        <select
+          value={activeSeason ?? ''}
+          onChange={(e) =>
+            onChangeActiveSeason(e.target.value ? (e.target.value as SeasonId) : null)
+          }
+          className={`px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition ${
+            activeSeason
+              ? 'bg-sky-500/20 border-sky-400/60 text-sky-200 font-semibold'
+              : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
+          }`}
+          title="สลับฤดูกาลเพื่อดูอุณหภูมิและแนวหิมะ"
+        >
+          <option value="" className="bg-[#0f1620] text-slate-200">
+            ฤดู: ปกติทั้งปี
+          </option>
+          {(['spring', 'summer', 'autumn', 'winter'] as SeasonId[]).map((sid) => (
+            <option key={sid} value={sid} className="bg-[#0f1620] text-slate-100">
+              {SEASON_LABELS_TH[sid]}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Right: Stats + Modals */}
@@ -253,6 +286,15 @@ export const SubBar: React.FC<SubBarProps> = ({
           <span className="text-sky-200">
             {Math.round(dims.widthKm).toLocaleString()} × {Math.round(dims.heightKm).toLocaleString()} กม.
           </span>
+        </button>
+
+        <button
+          onClick={onOpenCalendarModal}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          title="ปฏิทินโลก ดวงจันทร์ และจำลองฤดูกาล"
+        >
+          <Calendar className="w-3 h-3 text-sky-400" />
+          <span className="hidden xl:inline">ปฏิทิน</span>
         </button>
 
         <button

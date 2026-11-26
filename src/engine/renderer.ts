@@ -21,10 +21,12 @@ import {
   LayerVisibility,
   MapLabel,
   MapTheme,
+  SeasonId,
   SpecialFeatureMeta,
   TerrainId,
   ToolMode,
 } from '../types/map';
+import { computeSeasonalField } from './calendar';
 import { getCliffEdges } from './cliffs';
 import {
   computeOceanCurrents,
@@ -40,6 +42,8 @@ import {
   isWaterBiome,
   SQRT3,
 } from './hexMath';
+import { detectStrategicChokepoints } from './strategy';
+import { computeTectonicField, TectonicField } from './tectonics';
 import {
   formatLatitude,
   formatLongitude,
@@ -1109,6 +1113,34 @@ export class ChunkedMapRenderer {
     field: OceanCurrentField;
     streams: CurrentStreamline[];
   } | null = null;
+  private tectonicCache: { key: string; field: TectonicField } | null = null;
+  private seasonalCache: { key: string; temperature: Float32Array; snowMask: Uint8Array } | null =
+    null;
+
+  private getTectonicData(map: HexMapData): TectonicField {
+    const key = `${map.id}_${map.width}x${map.height}_${map.geography.seed}_${map.geography.tectonicPlates ?? 8}`;
+    if (this.tectonicCache && this.tectonicCache.key === key) {
+      return this.tectonicCache.field;
+    }
+    const field = computeTectonicField(
+      map.width,
+      map.height,
+      map.geography.seed,
+      map.geography.tectonicPlates ?? 8
+    );
+    this.tectonicCache = { key, field };
+    return field;
+  }
+
+  private getSeasonalData(map: HexMapData, season: SeasonId) {
+    const key = `${map.id}_${map.width}x${map.height}_${season}_${map.geography.latNorth}_${map.geography.latSouth}`;
+    if (this.seasonalCache && this.seasonalCache.key === key) {
+      return this.seasonalCache;
+    }
+    const res = computeSeasonalField(map, season);
+    this.seasonalCache = { key, ...res };
+    return this.seasonalCache;
+  }
 
   private getCurrentData(map: HexMapData): {
     field: OceanCurrentField;
@@ -1168,7 +1200,8 @@ export class ChunkedMapRenderer {
     cr: number,
     overlay: ClimateOverlay,
     layers: LayerVisibility,
-    mapTheme: MapTheme
+    mapTheme: MapTheme,
+    activeSeason?: SeasonId | null
   ): { canvas: HTMLCanvasElement; originX: number; originY: number } {
     const pad = BASE_HEX_RADIUS * 2;
     const startQ = cq * CHUNK_SIZE;
@@ -1195,6 +1228,9 @@ export class ChunkedMapRenderer {
     const religionColorMap = new Map(map.religionList.map((r) => [r.id, r.color]));
     const cultureColorMap = new Map((map.cultureList ?? []).map((c) => [c.id, c.color]));
     const currentField = overlay === 'currents' ? this.getCurrentData(map).field : null;
+    const tectonicField =
+      overlay === 'tectonics' || layers.tectonics ? this.getTectonicData(map) : null;
+    const seasonalField = activeSeason ? this.getSeasonalData(map, activeSeason) : null;
 
     for (let r = startR; r < endR; r++) {
       for (let q = startQ; q < endQ; q++) {
@@ -1214,7 +1250,7 @@ export class ChunkedMapRenderer {
         const lx = pos.x - originX;
         const ly = pos.y - originY;
         const rnd = hash2D(q, r);
-        const temp = map.temperature[idx] ?? 15;
+        const temp = seasonalField ? seasonalField.temperature[idx] : map.temperature[idx] ?? 15;
 
         let fill = meta.color;
         if (overlay === 'elevation') {
@@ -1223,6 +1259,12 @@ export class ChunkedMapRenderer {
           fill = temperatureColor(temp);
         } else if (overlay === 'moisture') {
           fill = moistureColor(map.moisture[idx] ?? 0.5);
+        } else if (overlay === 'tectonics' && tectonicField) {
+          const pColor = tectonicField.plates[tectonicField.plateIds[idx]]?.color ?? '#64748b';
+          const base = hexToRgb(pColor);
+          fill = isWater
+            ? mixRgb(base, [18, 32, 52], 0.55)
+            : mixRgb(base, [235, 232, 224], 0.25);
         } else if (overlay === 'currents' && currentField) {
           if (terrainId === TerrainId.LAKE) {
             fill = '#3b8ec2';
@@ -1290,6 +1332,46 @@ export class ChunkedMapRenderer {
         traceHexPath(ctx, lx, ly, BASE_HEX_RADIUS + 0.45);
         ctx.fillStyle = fill;
         ctx.fill();
+
+        // Seasonal snow cover frost wash on normal/biome/terrain views
+        if (
+          seasonalField &&
+          seasonalField.snowMask[idx] === 1 &&
+          !isWater &&
+          (overlay === 'none' || overlay === 'biome' || overlay === 'terrain')
+        ) {
+          traceHexPath(ctx, lx, ly, BASE_HEX_RADIUS + 0.35);
+          ctx.fillStyle =
+            activeSeason === 'winter' ? 'rgba(241, 248, 255, 0.58)' : 'rgba(235, 245, 255, 0.38)';
+          ctx.fill();
+        }
+
+        // Tectonic Fault Boundaries & Stress Tint
+        if (tectonicField && (overlay === 'tectonics' || layers.tectonics)) {
+          const myPlate = tectonicField.plateIds[idx];
+          const bKind = tectonicField.boundaryKind[idx];
+          if (bKind > 0) {
+            const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+            ctx.save();
+            ctx.strokeStyle =
+              bKind === 1 ? '#ef4444' : bKind === 2 ? '#f59e0b' : '#22d3ee';
+            ctx.lineWidth = bKind === 1 ? 2.4 : 1.9;
+            ctx.lineCap = 'round';
+            for (const nb of nbs) {
+              if (!nb.inMap) continue;
+              const nbPlate = tectonicField.plateIds[hexIndex(nb.q, nb.r, map.width)];
+              if (nbPlate !== myPlate) {
+                const [x1, y1] = hexVertex(lx, ly, BASE_HEX_RADIUS - 0.3, nb.edge);
+                const [x2, y2] = hexVertex(lx, ly, BASE_HEX_RADIUS - 0.3, nb.edge + 1);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+          }
+        }
 
         // Elevation Contour Lines
         if (layers.contours && !isWater) {
@@ -1563,11 +1645,14 @@ export class ChunkedMapRenderer {
       mapTheme?: MapTheme;
       refImage?: HTMLImageElement | null;
       refOpacity?: number;
+      activeSeason?: SeasonId | null;
+      submapDraftBox?: { minQ: number; maxQ: number; minR: number; maxR: number } | null;
     }
   ): void {
     const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
+    const activeSeason = options.activeSeason ?? null;
     const sizeKey = `${map.width}x${map.height}`;
-    const customSig = `${mapTheme}_${options.layers.hillshade !== false}_${Boolean(options.layers.contours)}_${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
+    const customSig = `${mapTheme}_${activeSeason ?? 'none'}_${options.layers.hillshade !== false}_${Boolean(options.layers.contours)}_${Boolean(options.layers.tectonics)}_${map.geography.tectonicPlates ?? 8}_${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
     const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${options.layers.cultures}_${customSig}`;
     if (
       map.id !== this.lastMapId ||
@@ -1622,7 +1707,8 @@ export class ChunkedMapRenderer {
           cr,
           options.overlay,
           options.layers,
-          mapTheme
+          mapTheme,
+          activeSeason
         );
         ctx.drawImage(canvas, originX, originY);
       }
@@ -1654,7 +1740,16 @@ export class ChunkedMapRenderer {
       options.layers.currents || options.overlay === 'currents'
         ? this.getCurrentData(map).streams
         : undefined;
-    drawDynamicLayers(ctx, map, cam.zoom, { ...options, mapTheme, currentStreams });
+    const tectonicField =
+      options.overlay === 'tectonics' || options.layers.tectonics
+        ? this.getTectonicData(map)
+        : undefined;
+    drawDynamicLayers(ctx, map, cam.zoom, {
+      ...options,
+      mapTheme,
+      currentStreams,
+      tectonicField,
+    });
 
     ctx.restore();
   }
@@ -1726,6 +1821,8 @@ function drawDynamicLayers(
     measurePoints: HexCoord[];
     currentStreams?: CurrentStreamline[];
     mapTheme?: MapTheme;
+    tectonicField?: TectonicField;
+    submapDraftBox?: { minQ: number; maxQ: number; minR: number; maxR: number } | null;
   }
 ): void {
   const { layers } = options;
@@ -2286,6 +2383,87 @@ function drawDynamicLayers(
     ctx.restore();
   }
 
+  // 9b. Tectonic Plate Drift Arrows & Labels
+  if (options.tectonicField && (options.overlay === 'tectonics' || layers.tectonics)) {
+    for (const plate of options.tectonicField.plates) {
+      const p = hexToPixel(plate.centerQ, plate.centerR, BASE_HEX_RADIUS);
+      const ax = p.x + plate.vx * 34;
+      const ay = p.y + plate.vy * 34;
+      const ang = Math.atan2(plate.vy, plate.vx);
+      ctx.save();
+      ctx.strokeStyle = plate.color;
+      ctx.fillStyle = plate.color;
+      ctx.lineWidth = Math.max(2.2, 2.8 / Math.max(0.5, zoom));
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(ax, ay);
+      ctx.stroke();
+
+      const head = 8;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - Math.cos(ang - 0.5) * head, ay - Math.sin(ang - 0.5) * head);
+      ctx.lineTo(ax - Math.cos(ang + 0.5) * head, ay - Math.sin(ang + 0.5) * head);
+      ctx.closePath();
+      ctx.fill();
+
+      if (zoom >= 0.35) {
+        ctx.font = '600 11px Sarabun, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(plate.name, p.x, p.y - 6);
+      }
+      ctx.restore();
+    }
+  }
+
+  // 9c. Strategic Chokepoints Tactical Markers
+  if (layers.chokepoints) {
+    const cps = detectStrategicChokepoints(map, 20);
+    for (const cp of cps) {
+      const p = hexToPixel(cp.q, cp.r, BASE_HEX_RADIUS);
+      ctx.save();
+      ctx.fillStyle =
+        cp.kind === 'mountain_pass'
+          ? 'rgba(180, 83, 9, 0.9)'
+          : cp.kind === 'isthmus'
+          ? 'rgba(16, 185, 129, 0.9)'
+          : 'rgba(14, 165, 233, 0.9)';
+      ctx.strokeStyle = '#fde68a';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(cp.kind === 'mountain_pass' ? '⛰' : cp.kind === 'isthmus' ? '🌉' : '⚓', p.x, p.y + 0.5);
+      ctx.restore();
+    }
+  }
+
+  // 9d. Regional Sub-Map Drag Selection Box
+  if (options.submapDraftBox) {
+    const pMin = hexToPixel(options.submapDraftBox.minQ, options.submapDraftBox.minR, BASE_HEX_RADIUS);
+    const pMax = hexToPixel(options.submapDraftBox.maxQ, options.submapDraftBox.maxR, BASE_HEX_RADIUS);
+    const rx = pMin.x - BASE_HEX_RADIUS;
+    const ry = pMin.y - BASE_HEX_RADIUS;
+    const rw = Math.max(BASE_HEX_RADIUS * 2, pMax.x - pMin.x + BASE_HEX_RADIUS * 2);
+    const rh = Math.max(BASE_HEX_RADIUS * 2, pMax.y - pMin.y + BASE_HEX_RADIUS * 2);
+    ctx.save();
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.14)';
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = Math.max(2, 2.5 / zoom);
+    ctx.setLineDash([8, 5]);
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.restore();
+  }
+
   // 10. Hover brush / hex cursor highlight
   if (options.hoverHex && options.tool !== 'view') {
     const r =
@@ -2401,6 +2579,7 @@ export function exportMapToPng(
     includeLegend: boolean;
     includeScale: boolean;
     mapTheme?: MapTheme;
+    activeSeason?: SeasonId | null;
   }
 ): string {
   const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
@@ -2452,6 +2631,18 @@ export function exportMapToPng(
           map.manualCurrents
         )
       : null;
+  const exportTectonics =
+    options.overlay === 'tectonics' || options.layers.tectonics
+      ? computeTectonicField(
+          map.width,
+          map.height,
+          map.geography.seed,
+          map.geography.tectonicPlates ?? 8
+        )
+      : null;
+  const exportSeasonal = options.activeSeason
+    ? computeSeasonalField(map, options.activeSeason)
+    : null;
 
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -2467,7 +2658,7 @@ export function exportMapToPng(
       const isWater =
         isWaterTerrainWithCustom(terrainId, map.customTerrains, map.terrainOverrides) ||
         meta.isWater;
-      const temp = map.temperature[idx] ?? 15;
+      const temp = exportSeasonal ? exportSeasonal.temperature[idx] : map.temperature[idx] ?? 15;
       const pos = hexToPixel(q, r, hexRadius);
       traceHexPath(ctx, pos.x, pos.y, hexRadius + 0.4);
       let hexFill =
@@ -2483,6 +2674,14 @@ export function exportMapToPng(
             : isWater
             ? oceanCurrentFillColor(exportCurrents.thermal[idx], exportCurrents.speed[idx])
             : mixRgb(hexToRgb(terrainMeta.color), [42, 50, 62], 0.45)
+          : options.overlay === 'tectonics' && exportTectonics
+          ? (() => {
+              const pColor =
+                exportTectonics.plates[exportTectonics.plateIds[idx]]?.color ?? '#64748b';
+              return isWater
+                ? mixRgb(hexToRgb(pColor), [12, 24, 44], 0.5)
+                : mixRgb(hexToRgb(pColor), [22, 30, 42], 0.25);
+            })()
           : options.overlay === 'terrain'
           ? terrainMeta.color
           : options.overlay === 'biome'
@@ -2502,6 +2701,7 @@ export function exportMapToPng(
         options.overlay !== 'temperature' &&
         options.overlay !== 'moisture' &&
         options.overlay !== 'currents' &&
+        options.overlay !== 'tectonics' &&
         options.overlay !== 'terrain' &&
         options.overlay !== 'biome'
       ) {
@@ -2533,6 +2733,43 @@ export function exportMapToPng(
       }
       ctx.fillStyle = hexFill;
       ctx.fill();
+      if (
+        exportSeasonal &&
+        exportSeasonal.snowMask[idx] === 1 &&
+        !isWater &&
+        (options.overlay === 'none' || options.overlay === 'biome' || options.overlay === 'terrain')
+      ) {
+        traceHexPath(ctx, pos.x, pos.y, hexRadius + 0.35);
+        ctx.fillStyle =
+          options.activeSeason === 'winter'
+            ? 'rgba(241, 248, 255, 0.58)'
+            : 'rgba(235, 245, 255, 0.38)';
+        ctx.fill();
+      }
+      if (exportTectonics && (options.overlay === 'tectonics' || options.layers.tectonics)) {
+        const myPlate = exportTectonics.plateIds[idx];
+        const bKind = exportTectonics.boundaryKind[idx];
+        if (bKind > 0) {
+          const nbs = getNeighborsWithEdge(q, r, map.width, map.height);
+          ctx.save();
+          ctx.strokeStyle = bKind === 1 ? '#ef4444' : bKind === 2 ? '#f59e0b' : '#22d3ee';
+          ctx.lineWidth = bKind === 1 ? 2.2 : 1.7;
+          ctx.lineCap = 'round';
+          for (const nb of nbs) {
+            if (!nb.inMap) continue;
+            const nbPlate = exportTectonics.plateIds[hexIndex(nb.q, nb.r, map.width)];
+            if (nbPlate !== myPlate) {
+              const [x1, y1] = hexVertex(pos.x, pos.y, hexRadius - 0.3, nb.edge);
+              const [x2, y2] = hexVertex(pos.x, pos.y, hexRadius - 0.3, nb.edge + 1);
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+          }
+          ctx.restore();
+        }
+      }
       if (options.layers.contours && !isWater) {
         const curLvl = Math.floor(Math.max(0, map.elevation[idx] ?? 0) * 10);
         if (curLvl > 0) {
@@ -2707,6 +2944,7 @@ export function exportMapToPng(
     draftPath: [],
     measurePoints: [],
     currentStreams: exportStreams,
+    tectonicField: exportTectonics ?? undefined,
     mapTheme,
   });
   ctx.restore();

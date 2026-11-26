@@ -21,6 +21,7 @@ import { getBiomeMetaWithCustom } from '../data/biomes';
 import { getFeatureMetaWithCustom } from '../data/features';
 import { getAllGovernmentTypes, getAllPoiTypes } from '../data/goods';
 import { getTerrainMetaWithCustom, isWaterTerrainWithCustom } from '../data/terrains';
+import { computeSeasonalField } from '../engine/calendar';
 import {
   computeOceanCurrents,
   getCurrentCompassLabel,
@@ -56,6 +57,8 @@ import {
   PoiType,
   ReferenceOverlayConfig,
   RoadType,
+  SeasonId,
+  SubMapBounds,
   TerrainId,
   ToolMode,
 } from '../types/map';
@@ -152,6 +155,8 @@ interface MapCanvasProps {
   onEraseRoadNear: (q: number, r: number) => void;
   onPlacePoi: (q: number, r: number) => void;
   onPlaceLabel: (q: number, r: number, text: string) => void;
+  activeSeason?: SeasonId | null;
+  onSelectSubMapZone?: (bounds: SubMapBounds) => void;
   onNotify: (msg: string) => void;
 }
 
@@ -248,6 +253,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onEraseRoadNear,
     onPlacePoi,
     onPlaceLabel,
+    activeSeason = null,
+    onSelectSubMapZone,
     onNotify,
   } = props;
 
@@ -273,6 +280,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const isPaintingRef = useRef(false);
   const draftPathRef = useRef<HexCoord[]>([]);
   const [draftPath, setDraftPath] = useState<HexCoord[]>([]);
+  const submapStartRef = useRef<HexCoord | null>(null);
+  const [submapDraftBox, setSubmapDraftBox] = useState<SubMapBounds | null>(null);
   const [autoRoadStart, setAutoRoadStart] = useState<HexCoord | null>(null);
   const lastWarnTimeRef = useRef(0);
 
@@ -419,9 +428,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       mapTheme: map.mapTheme ?? 'standard',
       refImage: refImgEl,
       refOpacity: referenceOverlay?.visible ? referenceOverlay.opacity : 0,
+      activeSeason,
+      submapDraftBox,
     });
     ctx.restore();
   }, [
+    activeSeason,
     brushSize,
     cam,
     climateOverlay,
@@ -435,6 +447,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     referenceOverlay,
     renderVersion,
     selectedCityId,
+    submapDraftBox,
     tool,
     tradeStartCityId,
     viewSize,
@@ -724,6 +737,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     } else if (tool === 'climate') {
       const nearCity = map.cities.find((c) => hexDistance(c, h) <= 1);
       if (nearCity) onPlaceOrSelectCityAt(h.q, h.r);
+    } else if (tool === 'submap') {
+      isPaintingRef.current = true;
+      submapStartRef.current = h;
+      setSubmapDraftBox({ minQ: h.q, maxQ: h.q, minR: h.r, maxR: h.r });
     }
   };
 
@@ -804,6 +821,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         draftPathRef.current = next;
         setDraftPath(next);
       }
+    } else if (tool === 'submap' && submapStartRef.current) {
+      const s = submapStartRef.current;
+      setSubmapDraftBox({
+        minQ: Math.min(s.q, h.q),
+        maxQ: Math.max(s.q, h.q),
+        minR: Math.min(s.r, h.r),
+        maxR: Math.max(s.r, h.r),
+      });
     }
   };
 
@@ -855,6 +880,23 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         }
         draftPathRef.current = [];
         setDraftPath([]);
+      } else if (tool === 'submap') {
+        const s = submapStartRef.current;
+        submapStartRef.current = null;
+        if (s && submapDraftBox) {
+          const spanW = Math.max(6, submapDraftBox.maxQ - submapDraftBox.minQ);
+          const spanH = Math.max(6, submapDraftBox.maxR - submapDraftBox.minR);
+          const minQ = Math.max(0, Math.min(map.width - 7, submapDraftBox.minQ));
+          const minR = Math.max(0, Math.min(map.height - 7, submapDraftBox.minR));
+          const bounds: SubMapBounds = {
+            minQ,
+            maxQ: Math.min(map.width - 1, minQ + spanW),
+            minR,
+            maxR: Math.min(map.height - 1, minR + spanH),
+          };
+          setSubmapDraftBox(null);
+          onSelectSubMapZone?.(bounds);
+        }
       }
     }
   };
@@ -873,6 +915,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       px: Math.max(44, Math.min(220, bestKm / kmPerPx)),
     };
   }, [cam.zoom, map.hexSizeKm]);
+
+  const seasonalField = useMemo(
+    () => (activeSeason ? computeSeasonalField(map, activeSeason) : null),
+    [activeSeason, map]
+  );
 
   const hoverInfo = useMemo(() => {
     if (!hoverHex) return null;
@@ -897,7 +944,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const cultId = map.cultures?.[idx] ?? '';
     const culture = cultId ? (map.cultureList ?? []).find((c) => c.id === cultId) : null;
     const elevLabel = formatElevationMeters(map.elevation[idx] ?? 0);
-    const temp = map.temperature[idx] ?? 15;
+    const temp = seasonalField ? seasonalField.temperature[idx] : (map.temperature[idx] ?? 15);
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
     const latStr = formatLatitude(getRowLatitude(hoverHex.r, map.height, map.geography));
     const lonStr = formatLongitude(getColLongitude(hoverHex.q, map.width, map.geography));
@@ -927,7 +974,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       curDir,
       city,
     };
-  }, [hoverHex, map, oceanCurrentField]);
+  }, [hoverHex, map, oceanCurrentField, seasonalField]);
 
   const activeTerrainMeta = getTerrainMetaWithCustom(
     activeTerrain,
@@ -1488,6 +1535,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           {tool === 'climate' && (
             <span className="text-amber-200">
               ปรับพารามิเตอร์ภูมิศาสตร์และลมประจำถิ่นได้ในแถบด้านขวา
+            </span>
+          )}
+
+          {tool === 'submap' && (
+            <span className="text-amber-200">
+              คลิกลากกรอบสี่เหลี่ยมบนแผนที่เพื่อเลือกโซนเจาะแผนที่ภูมิภาค (Sub-Map)
             </span>
           )}
         </div>

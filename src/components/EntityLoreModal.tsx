@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import { BookOpen, Crown, Flame, Landmark, Plus, Trash2, X } from 'lucide-react';
+import { BookOpen, Crown, Dices, Flame, Landmark, Plus, Trash2, X } from 'lucide-react';
+import {
+  generateCultureNameBatch,
+  getEffectiveLanguageProfile,
+  getPresetLanguageProfile,
+  LANGUAGE_PRESETS,
+  NameCategory,
+} from '../engine/nameGenerator';
 import {
   ARCHITECTURE_STYLES,
   CLERGY_STRUCTURES,
@@ -11,6 +18,7 @@ import {
 import {
   Culture,
   CultureDetails,
+  CultureLanguageProfile,
   CustomCategoryType,
   GovernmentDetails,
   HexMapData,
@@ -82,6 +90,9 @@ export const EntityLoreModal: React.FC<EntityLoreModalProps> = ({
   const [newDeityName, setNewDeityName] = useState('');
   const [newDeityDomain, setNewDeityDomain] = useState('');
   const [newDeitySymbol, setNewDeitySymbol] = useState('✨');
+
+  const [generatedNames, setGeneratedNames] = useState<string[]>([]);
+  const [nameGenCat, setNameGenCat] = useState<NameCategory>('city');
 
   const kingdom = kind === 'kingdom' ? map.kingdoms.find((k) => k.id === entityId) : null;
   const religion = kind === 'religion' ? map.religionList.find((r) => r.id === entityId) : null;
@@ -705,6 +716,169 @@ export const EntityLoreModal: React.FC<EntityLoreModalProps> = ({
                       className="w-full bg-[#161f2c] border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 outline-none"
                     />
                   </div>
+
+                  {/* Culture Language & Name Generator */}
+                  {(() => {
+                    const langProfile = getEffectiveLanguageProfile(culture);
+                    const patchLang = (lp: Partial<CultureLanguageProfile>) =>
+                      patchDetails({ languageProfile: { ...langProfile, ...lp } });
+                    return (
+                      <div className="sm:col-span-4 bg-[#111926] border border-slate-800 rounded-lg p-3 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-amber-300 flex items-center gap-1.5">
+                            <Dices className="w-3.5 h-3.5" />
+                            ระบบภาษาและเครื่องสุ่มชื่อตามวัฒนธรรม
+                          </span>
+                          <select
+                            value={langProfile.presetId ?? 'imperial'}
+                            onChange={(e) => {
+                              const nextPreset = getPresetLanguageProfile(e.target.value);
+                              patchDetails({ languageProfile: nextPreset });
+                              setGeneratedNames(
+                                generateCultureNameBatch(
+                                  { ...culture, details: { ...det, languageProfile: nextPreset } },
+                                  nameGenCat,
+                                  8,
+                                  Math.floor(Math.random() * 99999)
+                                )
+                              );
+                            }}
+                            className="bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100 outline-none"
+                          >
+                            {LANGUAGE_PRESETS.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                สไตล์ภาษา: {p.labelTh}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <label className="block text-slate-400 mb-0.5">พยางค์เริ่มต้น (คั่นด้วย ,)</label>
+                            <input
+                              value={langProfile.onsets.join(', ')}
+                              onChange={(e) =>
+                                patchLang({
+                                  onsets: e.target.value
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                })
+                              }
+                              className="w-full bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-slate-400 mb-0.5">พยางค์กลาง (คั่นด้วย ,)</label>
+                            <input
+                              value={langProfile.nuclei.join(', ')}
+                              onChange={(e) =>
+                                patchLang({
+                                  nuclei: e.target.value
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                })
+                              }
+                              className="w-full bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-slate-400 mb-0.5">คำลงท้ายชื่อเมือง (คั่นด้วย ,)</label>
+                            <input
+                              value={langProfile.citySuffixes.join(', ')}
+                              onChange={(e) =>
+                                patchLang({
+                                  citySuffixes: e.target.value
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                })
+                              }
+                              className="w-full bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-slate-400 mb-0.5">คำลงท้ายชื่อบุคคล (คั่นด้วย ,)</label>
+                            <input
+                              value={langProfile.personSuffixes.join(', ')}
+                              onChange={(e) =>
+                                patchLang({
+                                  personSuffixes: e.target.value
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                })
+                              }
+                              className="w-full bg-[#161f2c] border border-slate-700 rounded px-2 py-1 text-slate-100 outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {([
+                            ['city', 'เมือง'],
+                            ['river', 'แม่น้ำ'],
+                            ['sea', 'ทะเล/อ่าว'],
+                            ['person', 'บุคคล'],
+                          ] as [NameCategory, string][]).map(([cat, lbl]) => (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => {
+                                setNameGenCat(cat);
+                                setGeneratedNames(
+                                  generateCultureNameBatch(
+                                    culture,
+                                    cat,
+                                    8,
+                                    Math.floor(Math.random() * 99999)
+                                  )
+                                );
+                              }}
+                              className={`px-2 py-1 rounded border text-[11px] cursor-pointer ${
+                                nameGenCat === cat
+                                  ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-semibold'
+                                  : 'bg-[#161f2c] border-slate-700 text-slate-300'
+                              }`}
+                            >
+                              สุ่มชื่อ{lbl}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setGeneratedNames(
+                                generateCultureNameBatch(
+                                  culture,
+                                  nameGenCat,
+                                  8,
+                                  Math.floor(Math.random() * 99999)
+                                )
+                              )
+                            }
+                            className="ml-auto px-2.5 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold text-[11px] cursor-pointer flex items-center gap-1"
+                          >
+                            <Dices className="w-3.5 h-3.5" /> สุ่มชุดใหม่
+                          </button>
+                        </div>
+
+                        {generatedNames.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {generatedNames.map((nm, i) => (
+                              <span
+                                key={`${nm}_${i}`}
+                                className="px-2 py-0.5 rounded bg-[#161f2c] border border-slate-700 text-[11px] text-amber-200 select-all"
+                              >
+                                {nm}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {showNewTypeBox && (
                     <div className="sm:col-span-4 flex gap-2 pt-1">

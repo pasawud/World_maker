@@ -12,7 +12,22 @@ import {
   sculptElevationBrush,
 } from '../elevation';
 import { convertHeightmapPixelsToMap } from '../heightmap';
-import { extractRegionalSubMap } from '../submap';
+import {
+  advanceCalendarDays,
+  computeSeasonalField,
+  createDefaultCalendar,
+  getCurrentSeason,
+  getMoonPhase,
+} from '../calendar';
+import {
+  generateCultureName,
+  generateCultureNameBatch,
+  getPresetLanguageProfile,
+  LANGUAGE_PRESETS,
+} from '../nameGenerator';
+import { computeRealmEconomics, detectStrategicChokepoints } from '../strategy';
+import { computeKingdomBounds, extractRegionalSubMap } from '../submap';
+import { applyTectonicsToElevation, computeTectonicField } from '../tectonics';
 import {
   exportLorebookHtml,
   exportLorebookMarkdown,
@@ -1600,5 +1615,167 @@ describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () =>
     expect(restored.wikiEntries?.[0].title).toBe('พงศาวดารปฐมบท');
     expect(restored.bookmarks?.[0].name).toBe('เมืองหลวง');
     expect(restored.labels.find((l) => l.id === 'lbl_1')?.curveAmount).toBe(-0.3);
+  });
+
+  it('computes tectonic plates, applies geological relief, and preserves world generation', () => {
+    const field = computeTectonicField(48, 36, 4242, 8);
+    expect(field.plates.length).toBe(8);
+    expect(field.plateIds.length).toBe(48 * 36);
+    let boundaryCount = 0;
+    for (let i = 0; i < field.boundaryKind.length; i++) {
+      if (field.boundaryKind[i] > 0) boundaryCount++;
+    }
+    expect(boundaryCount).toBeGreaterThan(20);
+
+    const elev = new Array<number>(48 * 36).fill(0.18);
+    const out = applyTectonicsToElevation(elev, 48, 36, field, 0.8);
+    let changed = 0;
+    for (let i = 0; i < out.length; i++) {
+      if (Math.abs(out[i] - elev[i]) > 0.02) changed++;
+    }
+    expect(changed).toBeGreaterThan(15);
+
+    const tectonicWorld = generateWorld(48, 36, 20, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 1337,
+      tectonicPlates: 7,
+      tectonicStrength: 0.75,
+    });
+    expect(tectonicWorld.geography.tectonicPlates).toBe(7);
+    expect(tectonicWorld.geography.tectonicStrength).toBe(0.75);
+    expect(tectonicWorld.elevation.length).toBe(48 * 36);
+  });
+
+  it('generates culturally consistent city, river, sea, and person names', () => {
+    expect(LANGUAGE_PRESETS.length).toBeGreaterThanOrEqual(5);
+    const customCulture = {
+      id: 'cust_nord',
+      name: 'ชาวเหนือ',
+      color: '#38bdf8',
+      symbol: '❄️',
+      type: 'nordic',
+      details: {
+        architectureStyle: 'nordic',
+        languageFamily: 'Norse',
+        namingStyle: 'Skjold',
+        traditions: [],
+        values: [],
+        languageProfile: getPresetLanguageProfile('nordic'),
+      },
+    };
+    const cName = generateCultureName(customCulture, 'city', 101);
+    const rName = generateCultureName(customCulture, 'river', 202);
+    const sName = generateCultureName(customCulture, 'sea', 303);
+    const pName = generateCultureName(customCulture, 'person', 404);
+    expect(cName.length).toBeGreaterThan(2);
+    expect(rName.length).toBeGreaterThan(2);
+    expect(sName.length).toBeGreaterThan(2);
+    expect(pName.length).toBeGreaterThan(2);
+
+    const batch = generateCultureNameBatch(customCulture, 'city', 6, 999);
+    expect(new Set(batch).size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('advances world calendar with lunar phases and simulates winter vs summer snowline', () => {
+    const cal = createDefaultCalendar();
+    expect(cal.months.length).toBe(12);
+    expect(cal.moons.length).toBeGreaterThanOrEqual(1);
+
+    const rolled = advanceCalendarDays(cal, 400);
+    expect(rolled.year).toBeGreaterThan(cal.year);
+    const moonPhase = getMoonPhase(rolled, rolled.moons[0]);
+    expect(moonPhase.ratio).toBeGreaterThanOrEqual(0);
+    expect(moonPhase.ratio).toBeLessThanOrEqual(1);
+    expect(moonPhase.labelTh.length).toBeGreaterThan(0);
+    expect(['spring', 'summer', 'autumn', 'winter']).toContain(getCurrentSeason(rolled));
+
+    const map = generateWorld(48, 36, 20, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 777,
+      latNorth: 75,
+      latSouth: 15,
+    });
+    const winter = computeSeasonalField(map, 'winter');
+    const summer = computeSeasonalField(map, 'summer');
+    let winterSnow = 0;
+    let summerSnow = 0;
+    for (let i = 0; i < map.width * map.height; i++) {
+      winterSnow += winter.snowMask[i];
+      summerSnow += summer.snowMask[i];
+    }
+    // Northern hemisphere map (15°N..75°N) is colder & snowier in winter than in summer
+    expect(winter.temperature[0]).toBeLessThan(summer.temperature[0]);
+    expect(winterSnow).toBeGreaterThanOrEqual(summerSnow);
+  });
+
+  it('computes realm economics, detects mountain passes/isthmuses, scales 6x sub-maps, and round-trips calendar', () => {
+    const map = generateWorld(32, 24, 30, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 5150,
+      tectonicPlates: 6,
+      tectonicStrength: 0.6,
+    });
+    // Ensure a kingdom owns a block & city and craft a narrow mountain pass
+    const k0 = map.kingdoms[0];
+    for (let r = 8; r <= 12; r++) {
+      for (let q = 10; q <= 16; q++) {
+        const idx = hexIndex(q, r, map.width);
+        map.elevation[idx] = 0.25;
+        map.terrains![idx] = TerrainId.PLAINS;
+        map.biomes[idx] = BiomeId.DECIDUOUS_FOREST;
+        map.territories![idx] = k0.id;
+      }
+    }
+    // Mountain wall bracketing (13, 10) on top & bottom neighbors so (13, 10) forms a clean 2-exit pass
+    for (const [mq, mr] of [
+      [12, 9],
+      [13, 9],
+      [12, 11],
+      [13, 11],
+      [13, 8],
+      [13, 12],
+    ]) {
+      const idx = hexIndex(mq, mr, map.width);
+      map.elevation[idx] = 0.72;
+      map.terrains![idx] = TerrainId.MOUNTAIN;
+    }
+    map.cities = [
+      {
+        id: 'c_econ',
+        name: 'Goldhold',
+        q: 11,
+        r: 10,
+        tier: 'capital',
+        population: 24000,
+        kingdomId: k0.id,
+        religionId: map.religionList[0]?.id ?? 'solaris',
+        cultureId: map.cultureList?.[0]?.id ?? 'valerian',
+        producedGoods: ['grain'],
+        demandedGoods: ['iron'],
+        notes: '',
+      },
+    ];
+
+    const stats = computeRealmEconomics(map);
+    const kStat = stats.find((s) => s.kingdomId === k0.id);
+    expect(kStat).toBeDefined();
+    expect(kStat!.totalTreasuryIncome).toBeGreaterThan(0);
+    expect(kStat!.standingArmy).toBeGreaterThan(0);
+
+    const cps = detectStrategicChokepoints(map, 24);
+    expect(cps.some((c) => c.q === 13 && c.r === 10 && c.kind === 'mountain_pass')).toBe(true);
+
+    const kBounds = computeKingdomBounds(map, k0.id, 3);
+    expect(kBounds).not.toBeNull();
+    const sub6x = extractRegionalSubMap(map, kBounds!, 6, 'เขตซูม 5 กม.');
+    expect(sub6x.hexSizeKm).toBe(5);
+    expect(sub6x.cities.length).toBeGreaterThanOrEqual(1);
+
+    map.calendar = advanceCalendarDays(createDefaultCalendar(), 45);
+    const roundTripped = parseMapFromJson(serializeMapToJson(map));
+    expect(roundTripped.geography.tectonicPlates).toBe(6);
+    expect(roundTripped.geography.tectonicStrength).toBe(0.6);
+    expect(roundTripped.calendar?.monthIdx).toBe(map.calendar.monthIdx);
+    expect(roundTripped.calendar?.day).toBe(map.calendar.day);
   });
 });

@@ -3,6 +3,7 @@ import {
   CloudRain,
   Compass,
   Globe,
+  Layers,
   Mountain,
   RefreshCw,
   Sparkles,
@@ -446,6 +447,46 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
             step={0.1}
             value={draft.mountainScale}
             onChange={(e) => setDraft({ ...draft, mountainScale: Number(e.target.value) })}
+            className="w-full"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between mb-0.5">
+            <span className="flex items-center gap-1">
+              <Layers className="w-3 h-3 text-rose-400" /> จำนวนแผ่นเปลือกโลก (Tectonic)
+            </span>
+            <span className="text-slate-400">{draft.tectonicPlates ?? 8} แผ่น</span>
+          </div>
+          <input
+            type="range"
+            min={4}
+            max={16}
+            step={1}
+            value={draft.tectonicPlates ?? 8}
+            onChange={(e) => setDraft({ ...draft, tectonicPlates: Number(e.target.value) })}
+            className="w-full"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between mb-0.5">
+            <span className="flex items-center gap-1">
+              <Layers className="w-3 h-3 text-amber-400" /> แรงธรณีแปรสัณฐาน (แนวภูเขาไฟ/ร่องลึก)
+            </span>
+            <span className="text-slate-400">
+              {(draft.tectonicStrength ?? 0) === 0
+                ? 'ปิด (0.0x)'
+                : `${(draft.tectonicStrength ?? 0).toFixed(2)}x`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={1.2}
+            step={0.05}
+            value={draft.tectonicStrength ?? 0}
+            onChange={(e) => setDraft({ ...draft, tectonicStrength: Number(e.target.value) })}
             className="w-full"
           />
         </div>
