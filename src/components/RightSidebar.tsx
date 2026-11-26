@@ -48,6 +48,7 @@ import {
   ClimateOverlay,
   Culture,
   CultureType,
+  CustomTectonicPlate,
   GeographyConfig,
   GovernmentType,
   HexCoord,
@@ -85,6 +86,13 @@ interface RightSidebarProps {
   onToggleAutoShallowWater: () => void;
   onSyncShallowWater: () => void;
   onAutoGenerateCliffs: () => void;
+  onAutoPlaceFeatures: () => void;
+  tectonicEditPlateId: string | null;
+  onInitCustomPlates: () => void;
+  onUpdateCustomPlates: (plates: CustomTectonicPlate[] | undefined) => void;
+  onStartPlacePlate: (plateId: string | null) => void;
+  onApplyTectonicsToCurrent: (strength?: number) => void;
+  onOpenSimulateModal: () => void;
   brushSize: number;
   onChangeBrushSize: (n: number) => void;
   activeKingdomId: string;
@@ -163,6 +171,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onToggleAutoShallowWater,
     onSyncShallowWater,
     onAutoGenerateCliffs,
+    onAutoPlaceFeatures,
+    tectonicEditPlateId,
+    onInitCustomPlates,
+    onUpdateCustomPlates,
+    onStartPlacePlate,
+    onApplyTectonicsToCurrent,
+    onOpenSimulateModal,
     brushSize,
     onChangeBrushSize,
     activeKingdomId,
@@ -1230,10 +1245,20 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
         <ClimateGeneratorPanel
           config={map.geography}
           overlay={climateOverlay}
+          mapWidth={map.width}
+          mapHeight={map.height}
+          customTectonicPlates={map.customTectonicPlates}
+          tectonicEditPlateId={tectonicEditPlateId}
           onChangeOverlay={onChangeOverlay}
           onGenerateWorld={onGenerateWorld}
           onAutoRivers={onAutoRivers}
           onRecomputeBiomes={onRecomputeBiomes}
+          onInitCustomPlates={onInitCustomPlates}
+          onUpdateCustomPlates={onUpdateCustomPlates}
+          onStartPlacePlate={onStartPlacePlate}
+          onApplyTectonicsToCurrent={onApplyTectonicsToCurrent}
+          onAutoPlaceFeatures={onAutoPlaceFeatures}
+          onOpenSimulateModal={onOpenSimulateModal}
         />
       )}
 
@@ -1503,6 +1528,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
                   <span className="truncate">สร้างหน้าผาชายฝั่งอัตโนมัติ</span>
                 </button>
               </div>
+              <button
+                onClick={onAutoPlaceFeatures}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/45 text-[11px] text-violet-200 transition cursor-pointer"
+                title="วิเคราะห์แนวภูเขา แม่น้ำ ชายฝั่ง ทะเลทราย และแผ่นเปลือกโลก เพื่อวางลักษณะพิเศษอัตโนมัติทั้งแผนที่"
+              >
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span>วางลักษณะพิเศษอัตโนมัติ (ตามหลักภูมิศาสตร์)</span>
+              </button>
             </div>
           </>
         )}

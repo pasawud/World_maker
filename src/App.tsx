@@ -16,6 +16,7 @@ import { TimelineBar } from './components/TimelineBar';
 import { TimelineModal } from './components/TimelineModal';
 import { TopBar } from './components/TopBar';
 import { WorldbuildingModal } from './components/WorldbuildingModal';
+import { WorldSimulateModal } from './components/WorldSimulateModal';
 import { getAllPoiTypes } from './data/goods';
 import { hexDistance } from './engine/hexMath';
 import { exportMapToPng } from './engine/renderer';
@@ -40,6 +41,7 @@ export function App() {
   const [showWorldbuildingModal, setShowWorldbuildingModal] = useState(false);
   const [showHeightmapModal, setShowHeightmapModal] = useState(false);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [showSimulateModal, setShowSimulateModal] = useState(false);
   const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -182,6 +184,7 @@ export function App() {
         onOpenWorldbuildingModal={() => setShowWorldbuildingModal(true)}
         onOpenHeightmapModal={() => setShowHeightmapModal(true)}
         onOpenCalendarModal={() => setShowCalendarModal(true)}
+        onOpenSimulateModal={() => setShowSimulateModal(true)}
         onOpenCustomModal={() => setCustomModalTab('terrains')}
         onOpenExportModal={() => setShowExportModal(true)}
       />
@@ -293,6 +296,13 @@ export function App() {
           climateOverlay={editor.climateOverlay}
           activeSeason={editor.activeSeason}
           layers={editor.layers}
+          tectonicEditPlateId={editor.tectonicEditPlateId}
+          onCancelTectonicPlace={() => editor.setTectonicEditPlateId(null)}
+          onClickTectonicPlateAt={(q, r) => {
+            editor.placeOrMoveTectonicPlateAt(q, r);
+            if (editor.climateOverlay !== 'tectonics') editor.setClimateOverlay('tectonics');
+            showToast(`กำหนดตำแหน่งแผ่นเปลือกโลกที่ (${q}, ${r}) แล้ว`);
+          }}
           onSelectSubMapZone={(bounds) => {
             editor.setPendingSubMapBounds(bounds);
             setShowHeightmapModal(true);
@@ -484,6 +494,27 @@ export function App() {
             editor.runAutoGenerateCliffs();
             showToast('สร้างหน้าผาชายฝั่งและปรับระดับน้ำอัตโนมัติแล้ว');
           }}
+          onAutoPlaceFeatures={() => {
+            const count = editor.runAutoPlaceFeatures({ includeCliffs: true, useTectonics: true });
+            showToast(`วางลักษณะพิเศษตามหลักภูมิศาสตร์แล้ว ${count} ตำแหน่ง`);
+          }}
+          tectonicEditPlateId={editor.tectonicEditPlateId}
+          onInitCustomPlates={() => {
+            editor.initCustomTectonicPlates();
+            showToast('เปิดโหมดกำหนดแผ่นเปลือกโลกเองแล้ว');
+          }}
+          onUpdateCustomPlates={editor.updateCustomTectonicPlates}
+          onStartPlacePlate={(plateId) => {
+            editor.setTectonicEditPlateId(plateId);
+            if (plateId && editor.climateOverlay !== 'tectonics') {
+              editor.setClimateOverlay('tectonics');
+            }
+          }}
+          onApplyTectonicsToCurrent={(strength) => {
+            editor.runApplyTectonicsToCurrentMap(strength);
+            showToast('ปรับความสูง แนวภูเขา ร่องลึก และภูเขาไฟตามแผ่นเปลือกโลกแล้ว');
+          }}
+          onOpenSimulateModal={() => setShowSimulateModal(true)}
           brushSize={editor.brushSize}
           onChangeBrushSize={editor.setBrushSize}
           activeKingdomId={editor.activeKingdomId}
@@ -785,6 +816,19 @@ export function App() {
           onChangeSeason={editor.setActiveSeason}
           onUpdateCalendar={editor.updateCalendar}
           onClose={() => setShowCalendarModal(false)}
+        />
+      )}
+
+      {showSimulateModal && (
+        <WorldSimulateModal
+          map={editor.map}
+          onSimulate={(opts) => {
+            const sum = editor.runSimulateAllFromCurrentMap(opts);
+            showToast(
+              `จำลองครบทุกมิติแล้ว: เมือง ${sum.cities}, แม่น้ำ ${sum.rivers}, ลักษณะพิเศษ ${sum.features}, ถนน ${sum.roads}, การค้า ${sum.tradeRoutes}, ป้าย ${sum.labels}`
+            );
+          }}
+          onClose={() => setShowSimulateModal(false)}
         />
       )}
 

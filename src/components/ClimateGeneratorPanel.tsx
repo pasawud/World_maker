@@ -2,11 +2,15 @@ import React, { useEffect, useState } from 'react';
 import {
   CloudRain,
   Compass,
+  Crosshair,
   Globe,
   Layers,
   Mountain,
+  Plus,
   RefreshCw,
+  RotateCcw,
   Sparkles,
+  Trash2,
   Waves,
   Wind,
 } from 'lucide-react';
@@ -20,24 +24,50 @@ import {
   formatLongitude,
   formatSeaLevelMeters,
 } from '../engine/worldGenerator';
-import { ClimateOverlay, GeographyConfig, LandmassType, WindMode } from '../types/map';
+import {
+  ClimateOverlay,
+  CustomTectonicPlate,
+  GeographyConfig,
+  LandmassType,
+  WindMode,
+} from '../types/map';
 
 interface ClimateGeneratorPanelProps {
   config: GeographyConfig;
   overlay: ClimateOverlay;
+  mapWidth?: number;
+  mapHeight?: number;
+  customTectonicPlates?: CustomTectonicPlate[];
+  tectonicEditPlateId?: string | null;
   onChangeOverlay: (o: ClimateOverlay) => void;
   onGenerateWorld: (cfg: GeographyConfig) => void;
   onAutoRivers: () => void;
   onRecomputeBiomes: (cfg: GeographyConfig) => void;
+  onInitCustomPlates?: () => void;
+  onUpdateCustomPlates?: (plates: CustomTectonicPlate[] | undefined) => void;
+  onStartPlacePlate?: (plateId: string | null) => void;
+  onApplyTectonicsToCurrent?: (strength?: number) => void;
+  onAutoPlaceFeatures?: () => void;
+  onOpenSimulateModal?: () => void;
 }
 
 export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
   config,
   overlay,
+  mapWidth = 120,
+  mapHeight = 80,
+  customTectonicPlates,
+  tectonicEditPlateId,
   onChangeOverlay,
   onGenerateWorld,
   onAutoRivers,
   onRecomputeBiomes,
+  onInitCustomPlates,
+  onUpdateCustomPlates,
+  onStartPlacePlate,
+  onApplyTectonicsToCurrent,
+  onAutoPlaceFeatures,
+  onOpenSimulateModal,
 }) => {
   const [draft, setDraft] = useState<GeographyConfig>(() => ({
     ...config,
@@ -491,6 +521,221 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
           />
         </div>
 
+        {/* Custom Tectonic Plates Designer */}
+        {onInitCustomPlates && onUpdateCustomPlates && (
+          <div className="bg-[#0e151f] border border-slate-800 rounded-lg p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[11px] font-semibold text-amber-300 flex items-center gap-1">
+                <Layers className="w-3 h-3" />
+                กำหนดแผ่นเปลือกโลกเอง ({customTectonicPlates?.length ?? 0})
+              </span>
+              <button
+                type="button"
+                onClick={() => onChangeOverlay(overlay === 'tectonics' ? 'none' : 'tectonics')}
+                className={`px-1.5 py-0.5 rounded border text-[10px] cursor-pointer ${
+                  overlay === 'tectonics'
+                    ? 'bg-rose-500/20 border-rose-400 text-rose-200'
+                    : 'bg-[#16202e] border-slate-700 text-slate-300'
+                }`}
+              >
+                {overlay === 'tectonics' ? 'ซ่อนมุมมองแผ่น' : 'ดูมุมมองแผ่น'}
+              </button>
+            </div>
+
+            {!customTectonicPlates ? (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  สร้างแผ่นเปลือกโลกกำหนดเอง เพื่อลากจุดศูนย์กลาง ตั้งเป็นทวีป/มหาสมุทร และกำหนดทิศทางชนกัน/แยกตัวได้อิสระ
+                </p>
+                <button
+                  type="button"
+                  onClick={onInitCustomPlates}
+                  className="w-full py-1.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-amber-200 text-[11px] font-medium cursor-pointer"
+                >
+                  เปิดโหมดกำหนดแผ่นเปลือกโลกเอง
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="flex gap-1">
+                  {onStartPlacePlate && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onStartPlacePlate(tectonicEditPlateId === '__new__' ? null : '__new__')
+                      }
+                      className={`flex-1 flex items-center justify-center gap-1 py-1 rounded border text-[10px] cursor-pointer ${
+                        tectonicEditPlateId === '__new__'
+                          ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-semibold'
+                          : 'bg-[#16202e] hover:bg-[#1e2c40] border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      <Plus className="w-3 h-3" />
+                      {tectonicEditPlateId === '__new__' ? 'คลิกบนแผนที่...' : 'เพิ่มแผ่นบนแผนที่'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onStartPlacePlate?.(null);
+                      onUpdateCustomPlates(undefined);
+                    }}
+                    className="px-2 py-1 rounded bg-[#16202e] hover:bg-[#1e2c40] border border-slate-700 text-[10px] text-slate-400 cursor-pointer flex items-center gap-1"
+                    title="รีเซ็ตกลับไปใช้แผ่นเปลือกโลกอัตโนมัติ"
+                  >
+                    <RotateCcw className="w-3 h-3" /> รีเซ็ต
+                  </button>
+                </div>
+
+                <div className="max-h-48 overflow-y-auto space-y-1 pr-0.5">
+                  {customTectonicPlates.map((plate) => {
+                    const isPlacing = tectonicEditPlateId === plate.id;
+                    const dirButtons: [string, number, number][] = [
+                      ['↖', -0.7, -0.7],
+                      ['↑', 0, -1],
+                      ['↗', 0.7, -0.7],
+                      ['←', -1, 0],
+                      ['→', 1, 0],
+                      ['↙', -0.7, 0.7],
+                      ['↓', 0, 1],
+                      ['↘', 0.7, 0.7],
+                    ];
+                    return (
+                      <div
+                        key={plate.id}
+                        className={`p-1.5 rounded border text-[10px] space-y-1 ${
+                          isPlacing
+                            ? 'bg-amber-500/10 border-amber-400'
+                            : 'bg-[#131b26] border-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="color"
+                            value={plate.color}
+                            onChange={(e) =>
+                              onUpdateCustomPlates(
+                                customTectonicPlates.map((p) =>
+                                  p.id === plate.id ? { ...p, color: e.target.value } : p
+                                )
+                              )
+                            }
+                            className="w-5 h-5 bg-transparent rounded cursor-pointer shrink-0"
+                          />
+                          <input
+                            value={plate.name}
+                            onChange={(e) =>
+                              onUpdateCustomPlates(
+                                customTectonicPlates.map((p) =>
+                                  p.id === plate.id ? { ...p, name: e.target.value } : p
+                                )
+                              )
+                            }
+                            className="flex-1 min-w-0 bg-[#0d141e] border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateCustomPlates(
+                                customTectonicPlates.map((p) =>
+                                  p.id === plate.id ? { ...p, isOceanic: !p.isOceanic } : p
+                                )
+                              )
+                            }
+                            className={`px-1.5 py-0.5 rounded border cursor-pointer shrink-0 ${
+                              plate.isOceanic
+                                ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-200'
+                                : 'bg-stone-500/20 border-stone-500/40 text-stone-200'
+                            }`}
+                            title="สลับแผ่นทวีป / แผ่นมหาสมุทร"
+                          >
+                            {plate.isOceanic ? '🌊 สมุทร' : '🏔️ ทวีป'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={customTectonicPlates.length <= 2}
+                            onClick={() =>
+                              onUpdateCustomPlates(
+                                customTectonicPlates.filter((p) => p.id !== plate.id)
+                              )
+                            }
+                            className="text-slate-500 hover:text-rose-400 disabled:opacity-30 cursor-pointer"
+                            title="ลบแผ่นนี้ (ต้องเหลืออย่างน้อย 2 แผ่น)"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-slate-400 truncate">
+                            ({Math.max(0, Math.min(mapWidth - 1, Math.round(plate.centerQ)))},{' '}
+                            {Math.max(0, Math.min(mapHeight - 1, Math.round(plate.centerR)))})
+                          </span>
+                          <div className="flex items-center gap-0.5">
+                            {dirButtons.map(([sym, vx, vy]) => {
+                              const activeDir =
+                                Math.abs(plate.vx - vx) < 0.25 && Math.abs(plate.vy - vy) < 0.25;
+                              return (
+                                <button
+                                  key={sym}
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateCustomPlates(
+                                      customTectonicPlates.map((p) =>
+                                        p.id === plate.id ? { ...p, vx, vy } : p
+                                      )
+                                    )
+                                  }
+                                  className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer ${
+                                    activeDir
+                                      ? 'bg-amber-500 text-[#0e141c] font-bold'
+                                      : 'bg-[#1a2434] text-slate-300 hover:bg-[#243247]'
+                                  }`}
+                                  title="กำหนดทิศทางการเคลื่อนที่ของแผ่น"
+                                >
+                                  {sym}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {onStartPlacePlate && (
+                            <button
+                              type="button"
+                              onClick={() => onStartPlacePlate(isPlacing ? null : plate.id)}
+                              className={`px-1.5 py-0.5 rounded border cursor-pointer flex items-center gap-0.5 ${
+                                isPlacing
+                                  ? 'bg-amber-500 text-[#0e141c] border-amber-400 font-semibold'
+                                  : 'bg-[#182230] border-slate-700 text-amber-300'
+                              }`}
+                              title="คลิกจุดใหม่บนแผนที่เพื่อย้ายศูนย์กลางแผ่น"
+                            >
+                              <Crosshair className="w-2.5 h-2.5" /> ย้าย
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {onApplyTectonicsToCurrent && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onApplyTectonicsToCurrent(
+                        (draft.tectonicStrength ?? 0) > 0 ? draft.tectonicStrength : 0.65
+                      )
+                    }
+                    className="w-full py-1.5 rounded bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-200 text-[11px] font-medium cursor-pointer"
+                  >
+                    ยกเทือกเขา/ร่องลึก/ภูเขาไฟตามแผ่นบนแผนที่ปัจจุบัน
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div>
           <div className="flex justify-between mb-0.5">
             <span className="flex items-center gap-1">
@@ -552,6 +797,26 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
           <CloudRain className="w-3.5 h-3.5" />
           คำนวณไบโอมใหม่ตามภูมิอากาศจริง
         </button>
+
+        {onAutoPlaceFeatures && (
+          <button
+            onClick={onAutoPlaceFeatures}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/40 text-violet-200 text-xs transition cursor-pointer"
+          >
+            <Mountain className="w-3.5 h-3.5" />
+            วางลักษณะพิเศษอัตโนมัติ (ตามภูมิศาสตร์)
+          </button>
+        )}
+
+        {onOpenSimulateModal && (
+          <button
+            onClick={onOpenSimulateModal}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-amber-200 font-semibold text-xs transition cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            จำลองทุกมิติจากแผนที่ปัจจุบัน...
+          </button>
+        )}
       </div>
     </div>
   );

@@ -27,7 +27,16 @@ import {
 } from '../nameGenerator';
 import { computeRealmEconomics, detectStrategicChokepoints } from '../strategy';
 import { computeKingdomBounds, extractRegionalSubMap } from '../submap';
-import { applyTectonicsToElevation, computeTectonicField } from '../tectonics';
+import {
+  applyTectonicsToCurrentMap,
+  applyTectonicsToElevation,
+  computeTectonicField,
+} from '../tectonics';
+import {
+  autoPlaceSpecialFeatures,
+  DEFAULT_WORLD_SIMULATION_OPTIONS,
+  simulateAllFromCurrentMap,
+} from '../worldSimulator';
 import {
   exportLorebookHtml,
   exportLorebookMarkdown,
@@ -1777,5 +1786,127 @@ describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () =>
     expect(roundTripped.geography.tectonicStrength).toBe(0.6);
     expect(roundTripped.calendar?.monthIdx).toBe(map.calendar.monthIdx);
     expect(roundTripped.calendar?.day).toBe(map.calendar.day);
+  });
+
+  it('supports customizable tectonic plates, applies them to current maps, and round-trips & scales', () => {
+    const map = generateWorld(48, 36, 20, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 9001,
+    });
+    const lakeIdx = hexIndex(24, 18, map.width);
+    map.terrains![lakeIdx] = TerrainId.LAKE;
+    map.biomes[lakeIdx] = BiomeId.LAKE;
+    map.elevation[lakeIdx] = 0.08;
+
+    map.customTectonicPlates = [
+      {
+        id: 'p_west',
+        name: 'แผ่นตะวันตก',
+        color: '#f59e0b',
+        centerQ: 12,
+        centerR: 18,
+        vx: 1,
+        vy: 0,
+        isOceanic: false,
+      },
+      {
+        id: 'p_east',
+        name: 'แผ่นตะวันออก',
+        color: '#38bdf8',
+        centerQ: 36,
+        centerR: 18,
+        vx: -1,
+        vy: 0,
+        isOceanic: true,
+      },
+    ];
+
+    const field = computeTectonicField(map.width, map.height, map.geography.seed, 8, map.customTectonicPlates);
+    expect(field.plates.length).toBe(2);
+    expect(field.plates[0].name).toBe('แผ่นตะวันตก');
+    expect(field.plates[1].isOceanic).toBe(true);
+    let convergentCount = 0;
+    for (let i = 0; i < field.boundaryKind.length; i++) {
+      if (field.boundaryKind[i] === 1) convergentCount++;
+    }
+    expect(convergentCount).toBeGreaterThan(10);
+
+    const applied = applyTectonicsToCurrentMap(map, 0.75);
+    expect(applied.terrains![lakeIdx]).toBe(TerrainId.LAKE);
+    expect(applied.geography.tectonicStrength).toBe(0.75);
+
+    const restored = parseMapFromJson(serializeMapToJson(applied));
+    expect(restored.customTectonicPlates?.length).toBe(2);
+    expect(restored.customTectonicPlates?.[0].name).toBe('แผ่นตะวันตก');
+    expect(restored.customTectonicPlates?.[1].isOceanic).toBe(true);
+
+    const resized = resizeMap(restored, 96, 72, 10, 'preserve');
+    expect(resized.customTectonicPlates?.[0].centerQ).toBe(24);
+    expect(resized.customTectonicPlates?.[1].centerQ).toBe(72);
+  });
+
+  it('auto-places special features geographically while protecting lakes', () => {
+    const map = generateWorld(56, 40, 20, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 31415,
+    });
+    const lakeIdx = hexIndex(28, 20, map.width);
+    map.terrains![lakeIdx] = TerrainId.LAKE;
+    map.biomes[lakeIdx] = BiomeId.LAKE;
+    map.features = new Array<string>(map.width * map.height).fill('');
+
+    const res = autoPlaceSpecialFeatures(map, {
+      density: 1.3,
+      includeCliffs: true,
+      useTectonics: true,
+    });
+    expect(res.placedCount).toBeGreaterThan(5);
+    expect(res.terrains[lakeIdx]).toBe(TerrainId.LAKE);
+    expect(res.features[lakeIdx]).toBe('');
+
+    for (let i = 0; i < res.features.length; i++) {
+      if (res.features[i] === 'coral_reef' || res.features[i] === 'atoll' || res.features[i] === 'lagoon') {
+        expect(res.terrains[i]).toBe(TerrainId.SHALLOW_WATER);
+      }
+      if (res.features[i] === 'oasis' || res.features[i] === 'salt_flats' || res.features[i] === 'mesa') {
+        expect(res.biomes[i]).toBe(BiomeId.DESERT);
+      }
+    }
+  });
+
+  it('simulates all natural and civilization dimensions from an existing map', () => {
+    const map = generateWorld(52, 38, 25, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 2027,
+      landmassType: 'continent',
+    });
+    // Clear civilization layers so simulator builds them purely from the sculpted current map
+    map.cities = [];
+    map.roads = [];
+    map.tradeRoutes = [];
+    map.pois = [];
+    map.labels = [];
+    map.territories = new Array<string>(map.width * map.height).fill('');
+    map.religions = new Array<string>(map.width * map.height).fill('');
+    map.cultures = new Array<string>(map.width * map.height).fill('');
+
+    const lakeIdx = hexIndex(26, 19, map.width);
+    map.terrains![lakeIdx] = TerrainId.LAKE;
+    map.biomes[lakeIdx] = BiomeId.LAKE;
+
+    const { map: sim, summary } = simulateAllFromCurrentMap(map, {
+      ...DEFAULT_WORLD_SIMULATION_OPTIONS,
+      applyTectonics: true,
+      cityCount: 6,
+    });
+
+    expect(sim.terrains![lakeIdx]).toBe(TerrainId.LAKE);
+    expect(summary.cities).toBeGreaterThanOrEqual(3);
+    expect(summary.features).toBeGreaterThan(5);
+    expect(summary.roads).toBeGreaterThan(0);
+    expect(summary.labels).toBeGreaterThan(0);
+    expect(sim.territories?.some((t) => Boolean(t))).toBe(true);
+    expect(sim.cultures?.some((c) => Boolean(c))).toBe(true);
+    expect(sim.religions?.some((r) => Boolean(r))).toBe(true);
   });
 });

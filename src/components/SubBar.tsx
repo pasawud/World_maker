@@ -35,6 +35,7 @@ interface SubBarProps {
   onOpenWorldbuildingModal: () => void;
   onOpenHeightmapModal: () => void;
   onOpenCalendarModal: () => void;
+  onOpenSimulateModal: () => void;
   onOpenCustomModal: () => void;
   onOpenExportModal: () => void;
 }
@@ -73,6 +74,7 @@ export const SubBar: React.FC<SubBarProps> = ({
   onOpenWorldbuildingModal,
   onOpenHeightmapModal,
   onOpenCalendarModal,
+  onOpenSimulateModal,
   onOpenCustomModal,
   onOpenExportModal,
 }) => {
@@ -289,6 +291,15 @@ export const SubBar: React.FC<SubBarProps> = ({
         </button>
 
         <button
+          onClick={onOpenSimulateModal}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-[11px] text-amber-200 font-medium transition cursor-pointer"
+          title="จำลองโลกจากแผนที่ปัจจุบันครบทุกมิติ (ธรณี อากาศ แม่น้ำ ลักษณะพิเศษ เมือง การเมือง การค้า)"
+        >
+          <Globe2Icon />
+          <span>จำลองทุกมิติ</span>
+        </button>
+
+        <button
           onClick={onOpenCalendarModal}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
           title="ปฏิทินโลก ดวงจันทร์ และจำลองฤดูกาล"
@@ -358,3 +369,7 @@ export const SubBar: React.FC<SubBarProps> = ({
     </div>
   );
 };
+
+function Globe2Icon() {
+  return <Layers className="w-3 h-3 text-amber-300" />;
+}

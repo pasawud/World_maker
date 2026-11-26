@@ -1,14 +1,19 @@
+import { CustomTectonicPlate, HexMapData, TerrainId } from '../types/map';
+import { syncShallowWater } from './cliffs';
+import { terrainFromElevation } from './elevation';
 import { getNeighbors, hexIndex } from './hexMath';
 import { createNoise2D, mulberry32 } from './noise';
 
 export interface TectonicPlate {
   id: number;
+  customId?: string;
   name: string;
   centerQ: number;
   centerR: number;
   vx: number;
   vy: number;
   color: string;
+  isOceanic?: boolean;
 }
 
 export interface TectonicField {
@@ -63,7 +68,8 @@ export function computeTectonicField(
   width: number,
   height: number,
   seed: number,
-  plateCount = 8
+  plateCount = 8,
+  customPlates?: CustomTectonicPlate[]
 ): TectonicField {
   const safeCount = Math.max(4, Math.min(16, Math.round(plateCount)));
   const total = width * height;
@@ -71,18 +77,35 @@ export function computeTectonicField(
   const warpNoise = createNoise2D(seed + 8819);
 
   const plates: TectonicPlate[] = [];
-  for (let i = 0; i < safeCount; i++) {
-    const angle = rng() * Math.PI * 2;
-    const speed = 0.55 + rng() * 0.45;
-    plates.push({
-      id: i,
-      name: PLATE_NAMES[i % PLATE_NAMES.length],
-      centerQ: width * (0.1 + rng() * 0.8),
-      centerR: height * (0.1 + rng() * 0.8),
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      color: PLATE_COLORS[i % PLATE_COLORS.length],
-    });
+  if (customPlates && customPlates.length >= 2) {
+    for (let i = 0; i < customPlates.length; i++) {
+      const cp = customPlates[i];
+      plates.push({
+        id: i,
+        customId: cp.id,
+        name: cp.name || PLATE_NAMES[i % PLATE_NAMES.length],
+        centerQ: Math.max(0, Math.min(width - 1, Number(cp.centerQ) || 0)),
+        centerR: Math.max(0, Math.min(height - 1, Number(cp.centerR) || 0)),
+        vx: Number.isFinite(cp.vx) ? cp.vx : 0,
+        vy: Number.isFinite(cp.vy) ? cp.vy : 0,
+        color: cp.color || PLATE_COLORS[i % PLATE_COLORS.length],
+        isOceanic: Boolean(cp.isOceanic),
+      });
+    }
+  } else {
+    for (let i = 0; i < safeCount; i++) {
+      const angle = rng() * Math.PI * 2;
+      const speed = 0.55 + rng() * 0.45;
+      plates.push({
+        id: i,
+        name: PLATE_NAMES[i % PLATE_NAMES.length],
+        centerQ: width * (0.1 + rng() * 0.8),
+        centerR: height * (0.1 + rng() * 0.8),
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: PLATE_COLORS[i % PLATE_COLORS.length],
+      });
+    }
   }
 
   const plateIds = new Uint8Array(total);
@@ -183,25 +206,128 @@ export function applyTectonicsToElevation(
   for (let i = 0; i < total; i++) {
     const e = out[i];
     const st = field.stress[i];
+    const plate = field.plates[field.plateIds[i]];
+    const isOceanic = plate?.isOceanic;
+
     if (st > 0.08) {
-      if (e > -0.1) {
-        // Continental collision -> mountain belt
-        out[i] = Math.min(1, e + st * 0.42 * s);
+      if (isOceanic === true || e <= -0.1) {
+        // Oceanic subduction trench beside volcanic arc
+        out[i] = Math.max(-1, e - st * 0.32 * s);
+      } else if (isOceanic === false) {
+        // Continental-continental / coastal orogeny -> strong mountain uplift
+        out[i] = Math.min(1, e + st * 0.48 * s);
       } else {
-        // Ocean subduction trench beside arc
-        out[i] = Math.max(-1, e - st * 0.28 * s);
+        out[i] = Math.min(1, e + st * 0.42 * s);
       }
     } else if (st < -0.08) {
-      if (e > 0) {
-        // Continental rift valley
-        out[i] = Math.max(-0.35, e + st * 0.34 * s);
-      } else {
+      if (isOceanic === true || e <= 0) {
         // Mid-ocean volcanic ridge
         out[i] = Math.min(0.18, e + Math.abs(st) * 0.25 * s);
+      } else {
+        // Continental rift valley
+        out[i] = Math.max(-0.35, e + st * 0.34 * s);
       }
     }
   }
   return out;
+}
+
+/** Generate editable custom plate definitions seeded from the map's current tectonic field. */
+export function createCustomPlatesFromCurrent(map: HexMapData): CustomTectonicPlate[] {
+  const field = computeTectonicField(
+    map.width,
+    map.height,
+    map.geography.seed,
+    map.geography.tectonicPlates ?? 8,
+    map.customTectonicPlates
+  );
+  return field.plates.map((p, i) => {
+    const cq = Math.max(0, Math.min(map.width - 1, Math.round(p.centerQ)));
+    const cr = Math.max(0, Math.min(map.height - 1, Math.round(p.centerR)));
+    const e = map.elevation[hexIndex(cq, cr, map.width)] ?? 0;
+    return {
+      id: p.customId ?? `plate_${i + 1}`,
+      name: p.name,
+      color: p.color,
+      centerQ: cq,
+      centerR: cr,
+      vx: Number(p.vx.toFixed(2)),
+      vy: Number(p.vy.toFixed(2)),
+      isOceanic: p.isOceanic ?? e <= 0,
+    };
+  });
+}
+
+/**
+ * Apply the current map's tectonic plates & fault lines to its existing elevation, terrains, and fault features
+ * while preserving lakes and custom terrains.
+ */
+export function applyTectonicsToCurrentMap(
+  map: HexMapData,
+  strength = 0.65
+): HexMapData {
+  const effStrength = Math.max(0.1, Math.min(1.5, strength));
+  const field = computeTectonicField(
+    map.width,
+    map.height,
+    map.geography.seed,
+    map.geography.tectonicPlates ?? 8,
+    map.customTectonicPlates
+  );
+  const nextElevation = applyTectonicsToElevation(
+    map.elevation,
+    map.width,
+    map.height,
+    field,
+    effStrength
+  );
+
+  const total = map.width * map.height;
+  const nextTerrains = new Array<number>(total);
+  for (let i = 0; i < total; i++) {
+    const curT = map.terrains?.[i];
+    if (curT === TerrainId.LAKE || (curT !== undefined && curT >= 100)) {
+      nextTerrains[i] = curT;
+      nextElevation[i] = map.elevation[i] ?? 0;
+    } else {
+      nextTerrains[i] = terrainFromElevation(nextElevation[i], map.moisture[i] ?? 0.5);
+    }
+  }
+
+  const rawFeatures = applyTectonicFeatures(
+    map.features ?? new Array<string>(total).fill(''),
+    map.width,
+    map.height,
+    nextElevation,
+    field,
+    map.geography.seed
+  );
+  for (let i = 0; i < total; i++) {
+    if (nextTerrains[i] === TerrainId.LAKE) rawFeatures[i] = '';
+  }
+
+  const synced = syncShallowWater({
+    width: map.width,
+    height: map.height,
+    terrains: nextTerrains,
+    biomes: map.biomes,
+    elevation: nextElevation,
+    features: rawFeatures,
+    customBiomes: map.customBiomes,
+  });
+
+  return {
+    ...map,
+    updatedAt: new Date().toISOString(),
+    geography: {
+      ...map.geography,
+      tectonicStrength: effStrength,
+    },
+    elevation: synced.elevation,
+    terrains: synced.terrains,
+    biomes: synced.biomes,
+    features: synced.features,
+  };
 }
 
 /** Place active tectonic volcanoes, hot springs, and canyons along fault lines. */

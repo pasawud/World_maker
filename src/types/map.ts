@@ -613,6 +613,17 @@ export interface WorldMoon {
   color: string;
 }
 
+export interface CustomTectonicPlate {
+  id: string;
+  name: string;
+  color: string;
+  centerQ: number;
+  centerR: number;
+  vx: number;
+  vy: number;
+  isOceanic?: boolean;
+}
+
 export interface WorldCalendar {
   name: string;
   year: number;
@@ -652,6 +663,7 @@ export interface HexMapData {
   terrainOverrides?: Record<number, Partial<Omit<CustomTerrain, 'id'>>>;
   featureOverrides?: Record<string, Partial<Omit<SpecialFeatureMeta, 'id'>>>;
   manualCurrents?: ManualCurrentPath[];
+  customTectonicPlates?: CustomTectonicPlate[];
   customPoiTypes: CustomPoiType[];
   customGovernmentTypes?: CustomCategoryType[];
   customReligionTypes?: CustomCategoryType[];

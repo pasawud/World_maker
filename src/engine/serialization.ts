@@ -347,6 +347,20 @@ export function parseMapFromJson(raw: string): HexMapData {
       Array.isArray((obj.calendar as HexMapData['calendar'])?.months)
         ? (obj.calendar as HexMapData['calendar'])
         : undefined,
+    customTectonicPlates: Array.isArray(obj.customTectonicPlates)
+      ? (obj.customTectonicPlates as Record<string, unknown>[])
+          .filter((p) => p && typeof p === 'object')
+          .map((p, idx) => ({
+            id: typeof p.id === 'string' && p.id ? p.id : `plate_${idx + 1}`,
+            name: typeof p.name === 'string' && p.name.trim() ? p.name : `แผ่น ${idx + 1}`,
+            color: typeof p.color === 'string' && p.color ? p.color : '#f59e0b',
+            centerQ: Math.max(0, Math.min(width - 1, Number(p.centerQ) || 0)),
+            centerR: Math.max(0, Math.min(height - 1, Number(p.centerR) || 0)),
+            vx: Number.isFinite(Number(p.vx)) ? Number(p.vx) : 0.4,
+            vy: Number.isFinite(Number(p.vy)) ? Number(p.vy) : 0.2,
+            isOceanic: Boolean(p.isOceanic),
+          }))
+      : undefined,
     roads,
     tradeRoutes: Array.isArray(obj.tradeRoutes) ? (obj.tradeRoutes as HexMapData['tradeRoutes']) : [],
     pois: Array.isArray(obj.pois) ? (obj.pois as HexMapData['pois']) : [],
@@ -391,6 +405,11 @@ export function resizeMap(
       wikiEntries: map.wikiEntries ?? [],
       bookmarks: [],
       calendar: map.calendar,
+      customTectonicPlates: map.customTectonicPlates?.map((p) => ({
+        ...p,
+        centerQ: Math.max(0, Math.min(safeW - 1, Math.round((p.centerQ / Math.max(1, map.width)) * safeW))),
+        centerR: Math.max(0, Math.min(safeH - 1, Math.round((p.centerR / Math.max(1, map.height)) * safeH))),
+      })),
     };
   }
 
@@ -456,6 +475,11 @@ export function resizeMap(
     }))
     .filter((cp) => cp.points.length >= 2);
   const bookmarks = (map.bookmarks ?? []).filter((bm) => inNewBounds(bm.q, bm.r));
+  const customTectonicPlates = map.customTectonicPlates?.map((p) => ({
+    ...p,
+    centerQ: Math.max(0, Math.min(safeW - 1, Math.round((p.centerQ / Math.max(1, map.width)) * safeW))),
+    centerR: Math.max(0, Math.min(safeH - 1, Math.round((p.centerR / Math.max(1, map.height)) * safeH))),
+  }));
 
   const nextMap: HexMapData = {
     ...map,
@@ -476,6 +500,7 @@ export function resizeMap(
     manualCurrents,
     campaigns,
     bookmarks,
+    customTectonicPlates,
     cities,
     roads,
     pois,

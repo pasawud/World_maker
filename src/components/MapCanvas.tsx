@@ -157,6 +157,9 @@ interface MapCanvasProps {
   onPlaceLabel: (q: number, r: number, text: string) => void;
   activeSeason?: SeasonId | null;
   onSelectSubMapZone?: (bounds: SubMapBounds) => void;
+  tectonicEditPlateId?: string | null;
+  onCancelTectonicPlace?: () => void;
+  onClickTectonicPlateAt?: (q: number, r: number) => void;
   onNotify: (msg: string) => void;
 }
 
@@ -255,6 +258,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onPlaceLabel,
     activeSeason = null,
     onSelectSubMapZone,
+    tectonicEditPlateId = null,
+    onCancelTectonicPlace,
+    onClickTectonicPlateAt,
     onNotify,
   } = props;
 
@@ -430,6 +436,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       refOpacity: referenceOverlay?.visible ? referenceOverlay.opacity : 0,
       activeSeason,
       submapDraftBox,
+      selectedTectonicPlateId: tectonicEditPlateId,
     });
     ctx.restore();
   }, [
@@ -448,6 +455,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     renderVersion,
     selectedCityId,
     submapDraftBox,
+    tectonicEditPlateId,
     tool,
     tradeStartCityId,
     viewSize,
@@ -583,6 +591,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
 
     const h = screenToHex(e.clientX, e.clientY);
     if (!h) return;
+
+    if (tectonicEditPlateId) {
+      onClickTectonicPlateAt?.(h.q, h.r);
+      return;
+    }
 
     if (tool === 'terrain') {
       if (terrainEditMode === 'sculpt' && activeFeature === null) {
@@ -1003,6 +1016,25 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         onContextMenu={(e) => e.preventDefault()}
         className="w-full h-full block touch-none"
       />
+
+      {/* Tectonic Plate Picker Floating Banner */}
+      {tectonicEditPlateId && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-[#141d2b]/95 border border-amber-400/70 rounded-full px-3.5 py-1.5 text-xs text-amber-200 shadow-2xl">
+          <span>
+            {tectonicEditPlateId === '__new__'
+              ? 'คลิกบนแผนที่เพื่อวางจุดศูนย์กลางแผ่นเปลือกโลกใหม่'
+              : 'คลิกบนแผนที่เพื่อย้ายจุดศูนย์กลางแผ่นเปลือกโลกที่เลือก'}
+          </span>
+          {onCancelTectonicPlace && (
+            <button
+              onClick={onCancelTectonicPlace}
+              className="px-2 py-0.5 rounded-full bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 text-[11px] cursor-pointer"
+            >
+              ยกเลิก
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Contextual Floating Tool Bar */}
       {tool !== 'view' && (

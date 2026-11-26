@@ -35,6 +35,17 @@ import {
   switchMapToEra,
 } from '../engine/timeline';
 import {
+  applyTectonicsToCurrentMap,
+  createCustomPlatesFromCurrent,
+} from '../engine/tectonics';
+import {
+  autoPlaceSpecialFeatures,
+  AutoFeatureOptions,
+  simulateAllFromCurrentMap,
+  WorldSimulationOptions,
+  WorldSimulationSummary,
+} from '../engine/worldSimulator';
+import {
   autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
@@ -50,6 +61,7 @@ import {
   CustomBiome,
   CustomCategoryType,
   CustomPoiType,
+  CustomTectonicPlate,
   CustomTerrain,
   DiplomaticRelationType,
   GeographyConfig,
@@ -132,6 +144,7 @@ export function useMapEditor() {
   const [showMinimap, setShowMinimap] = useState<boolean>(true);
   const [activeSeason, setActiveSeason] = useState<SeasonId | null>(null);
   const [pendingSubMapBounds, setPendingSubMapBounds] = useState<SubMapBounds | null>(null);
+  const [tectonicEditPlateId, setTectonicEditPlateId] = useState<string | null>(null);
 
   const [activeKingdomId, setActiveKingdomId] = useState<string>(
     () => map.kingdoms[0]?.id ?? 'north'
@@ -1978,6 +1991,123 @@ export function useMapEditor() {
     [commitMapChange]
   );
 
+  const updateCustomTectonicPlates = useCallback(
+    (plates: CustomTectonicPlate[] | undefined) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        customTectonicPlates: plates,
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const initCustomTectonicPlates = useCallback(() => {
+    commitMapChange((prev) => ({
+      ...prev,
+      customTectonicPlates: createCustomPlatesFromCurrent(prev),
+    }));
+    setClimateOverlay('tectonics');
+  }, [commitMapChange]);
+
+  const placeOrMoveTectonicPlateAt = useCallback(
+    (q: number, r: number) => {
+      const targetId = tectonicEditPlateId;
+      if (!targetId) return;
+      commitMapChange((prev) => {
+        const current = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+        const idx = hexIndex(q, r, prev.width);
+        const isOceanicCell = (prev.elevation[idx] ?? 0) <= 0;
+        if (targetId === '__new__') {
+          const palette = [
+            '#f59e0b',
+            '#38bdf8',
+            '#a78bfa',
+            '#34d399',
+            '#fb7185',
+            '#facc15',
+            '#60a5fa',
+            '#2dd4bf',
+          ];
+          const num = current.length + 1;
+          const nextPlate: CustomTectonicPlate = {
+            id: `plate_${Date.now().toString(36)}`,
+            name: `แผ่นกำหนดเอง #${num}`,
+            color: palette[(num - 1) % palette.length],
+            centerQ: q,
+            centerR: r,
+            vx: 0.7,
+            vy: 0.0,
+            isOceanic: isOceanicCell,
+          };
+          return { ...prev, customTectonicPlates: [...current, nextPlate] };
+        }
+        return {
+          ...prev,
+          customTectonicPlates: current.map((p) =>
+            p.id === targetId ? { ...p, centerQ: q, centerR: r } : p
+          ),
+        };
+      });
+      setTectonicEditPlateId(null);
+    },
+    [commitMapChange, tectonicEditPlateId]
+  );
+
+  const runApplyTectonicsToCurrentMap = useCallback(
+    (strength?: number) => {
+      commitMapChange((prev) =>
+        applyTectonicsToCurrentMap(
+          prev,
+          strength ??
+            (prev.geography.tectonicStrength && prev.geography.tectonicStrength > 0
+              ? prev.geography.tectonicStrength
+              : 0.65)
+        )
+      );
+    },
+    [commitMapChange]
+  );
+
+  const runAutoPlaceFeatures = useCallback(
+    (options?: AutoFeatureOptions): number => {
+      let placed = 0;
+      commitMapChange((prev) => {
+        const res = autoPlaceSpecialFeatures(prev, options);
+        placed = res.placedCount;
+        return {
+          ...prev,
+          features: res.features,
+          elevation: res.elevation,
+          terrains: res.terrains,
+          biomes: res.biomes,
+        };
+      });
+      return placed;
+    },
+    [commitMapChange]
+  );
+
+  const runSimulateAllFromCurrentMap = useCallback(
+    (options: WorldSimulationOptions): WorldSimulationSummary => {
+      let summary: WorldSimulationSummary = {
+        rivers: 0,
+        features: 0,
+        cities: 0,
+        roads: 0,
+        tradeRoutes: 0,
+        pois: 0,
+        labels: 0,
+      };
+      commitMapChange((prev) => {
+        const res = simulateAllFromCurrentMap(prev, options);
+        summary = res.summary;
+        return res.map;
+      });
+      return summary;
+    },
+    [commitMapChange]
+  );
+
   return {
     map,
     setMap,
@@ -2152,5 +2282,13 @@ export function useMapEditor() {
     pendingSubMapBounds,
     setPendingSubMapBounds,
     updateCalendar,
+    tectonicEditPlateId,
+    setTectonicEditPlateId,
+    updateCustomTectonicPlates,
+    initCustomTectonicPlates,
+    placeOrMoveTectonicPlateAt,
+    runApplyTectonicsToCurrentMap,
+    runAutoPlaceFeatures,
+    runSimulateAllFromCurrentMap,
   };
 }
