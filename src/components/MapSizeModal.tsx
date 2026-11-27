@@ -23,21 +23,28 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
 
   const computedHexW =
     inputMode === 'hex'
-      ? Math.max(20, Math.min(300, Math.round(width)))
-      : Math.max(20, Math.min(300, Math.round(targetKmW / Math.max(0.5, hexSizeKm))));
+      ? Math.max(10, Math.min(1200, Math.round(width)))
+      : Math.max(10, Math.min(1200, Math.round(targetKmW / Math.max(0.1, hexSizeKm))));
 
   const computedHexH =
     inputMode === 'hex'
-      ? Math.max(20, Math.min(240, Math.round(height)))
+      ? Math.max(10, Math.min(1200, Math.round(height)))
       : Math.max(
-          20,
-          Math.min(240, Math.round(targetKmH / (Math.max(0.5, hexSizeKm) * (SQRT3 / 2))))
+          10,
+          Math.min(1200, Math.round(targetKmH / (Math.max(0.1, hexSizeKm) * (SQRT3 / 2))))
         );
 
   const previewDims = useMemo(
-    () => computeRealDimensions(computedHexW, computedHexH, Math.max(0.5, hexSizeKm)),
+    () => computeRealDimensions(computedHexW, computedHexH, Math.max(0.1, hexSizeKm)),
     [computedHexW, computedHexH, hexSizeKm]
   );
+
+  const sizeTier =
+    previewDims.totalHexes > 250000
+      ? { label: 'Ultra (Overview LOD + LRU)', cls: 'text-rose-300 bg-rose-500/15 border-rose-500/40' }
+      : previewDims.totalHexes > 60000
+      ? { label: 'Giant (Chunk + Overview Cache)', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/40' }
+      : { label: 'มาตรฐาน (60 FPS)', cls: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40' };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
@@ -99,15 +106,15 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
 
           <div>
             <label className="block text-[11px] text-slate-400 mb-1">
-              ระยะทางต่อ 1 ช่อง (กม.)
+              ระยะทางต่อ 1 ช่อง (กม.) (0.1 – 5,000)
             </label>
             <input
               type="number"
-              min={0.5}
-              max={500}
-              step={1}
+              min={0.1}
+              max={5000}
+              step={0.5}
               value={hexSizeKm}
-              onChange={(e) => setHexSizeKm(Math.max(0.5, Number(e.target.value) || 1))}
+              onChange={(e) => setHexSizeKm(Math.max(0.1, Number(e.target.value) || 1))}
               className="w-full bg-[#0f1620] border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 outline-none"
             />
           </div>
@@ -116,27 +123,27 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">
-                  ความกว้าง (20 – 300 ช่อง)
+                  ความกว้าง (10 – 1,200 ช่อง · ปลดล็อกแล้ว)
                 </label>
                 <input
                   type="number"
-                  min={20}
-                  max={300}
+                  min={10}
+                  max={1200}
                   value={width}
-                  onChange={(e) => setWidth(Number(e.target.value) || 20)}
+                  onChange={(e) => setWidth(Number(e.target.value) || 10)}
                   className="w-full bg-[#0f1620] border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 outline-none"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">
-                  ความสูง (20 – 240 ช่อง)
+                  ความสูง (10 – 1,200 ช่อง · ปลดล็อกแล้ว)
                 </label>
                 <input
                   type="number"
-                  min={20}
-                  max={240}
+                  min={10}
+                  max={1200}
                   value={height}
-                  onChange={(e) => setHeight(Number(e.target.value) || 20)}
+                  onChange={(e) => setHeight(Number(e.target.value) || 10)}
                   className="w-full bg-[#0f1620] border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 outline-none"
                 />
               </div>
@@ -149,11 +156,11 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
                 </label>
                 <input
                   type="number"
-                  min={50}
-                  max={50000}
+                  min={10}
+                  max={500000}
                   step={50}
                   value={targetKmW}
-                  onChange={(e) => setTargetKmW(Number(e.target.value) || 50)}
+                  onChange={(e) => setTargetKmW(Number(e.target.value) || 10)}
                   className="w-full bg-[#0f1620] border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 outline-none"
                 />
               </div>
@@ -163,11 +170,11 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
                 </label>
                 <input
                   type="number"
-                  min={50}
-                  max={50000}
+                  min={10}
+                  max={500000}
                   step={50}
                   value={targetKmH}
-                  onChange={(e) => setTargetKmH(Number(e.target.value) || 50)}
+                  onChange={(e) => setTargetKmH(Number(e.target.value) || 10)}
                   className="w-full bg-[#0f1620] border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 outline-none"
                 />
               </div>
@@ -175,12 +182,17 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
           )}
 
           {/* Live Readout */}
-          <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3 space-y-1">
-            <div className="flex justify-between">
+          <div className="bg-[#0f1620] border border-slate-800 rounded-lg p-3 space-y-1.5">
+            <div className="flex justify-between items-center gap-2">
               <span className="text-slate-400">ขนาดกริดที่จะได้:</span>
-              <span className="text-amber-300 font-semibold">
-                {computedHexW} × {computedHexH} ช่อง ({previewDims.totalHexes.toLocaleString()} ช่อง)
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-amber-300 font-semibold">
+                  {computedHexW} × {computedHexH} ช่อง ({previewDims.totalHexes.toLocaleString()} ช่อง)
+                </span>
+                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${sizeTier.cls}`}>
+                  {sizeTier.label}
+                </span>
+              </div>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">มิติระยะจริง:</span>
@@ -196,6 +208,11 @@ export const MapSizeModal: React.FC<MapSizeModalProps> = ({ map, onApply, onClos
                 {Math.round(previewDims.totalAreaKm2).toLocaleString()} ตร.กม.
               </span>
             </div>
+            {previewDims.totalHexes > 60000 && (
+              <p className="text-[10px] text-slate-400 pt-0.5 border-t border-slate-800/80">
+                ⚡ แผนที่ขนาดยักษ์ใช้ระบบ Overview LOD, Chunk Caching (LRU) และจำกัด Autosave เพื่อความลื่นไหล — แนะนำกดส่งออก JSON เพื่อสำรองข้อมูล
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-4">

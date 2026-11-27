@@ -2095,4 +2095,35 @@ describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () =>
     );
     expect(directWithCustom.customTectonicPlates?.length).toBe(scPlates.length);
   });
+
+  it('supports unlocked giant map dimensions in resizeMap, submap extraction, and compact JSON round-trips', () => {
+    const base = generateWorld(40, 30, 20, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 9191,
+    });
+
+    // Resize preserve beyond old 300x240 cap and down to sub-0.5km hex scale
+    const giant = resizeMap(base, 420, 280, 0.25, 'preserve');
+    expect(giant.width).toBe(420);
+    expect(giant.height).toBe(280);
+    expect(giant.hexSizeKm).toBe(0.25);
+    expect(giant.elevation).toHaveLength(420 * 280);
+
+    // serializeMapToJson uses compact JSON (> 45,000 hexes) and parseMapFromJson accepts > 400 dims
+    const json = serializeMapToJson(giant);
+    expect(json.includes('\n  ')).toBe(false);
+    const restored = parseMapFromJson(json);
+    expect(restored.width).toBe(420);
+    expect(restored.height).toBe(280);
+
+    // extractRegionalSubMap scales cleanly beyond old 320x240 limit
+    const sub = extractRegionalSubMap(
+      giant,
+      { minQ: 0, maxQ: 199, minR: 0, maxR: 149 },
+      2,
+      'Giant Region'
+    );
+    expect(sub.width).toBe(400);
+    expect(sub.height).toBe(300);
+  });
 });

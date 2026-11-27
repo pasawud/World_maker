@@ -19,6 +19,8 @@ import { DEFAULT_GEOGRAPHY_CONFIG, generateWorld } from './worldGenerator';
 
 const AUTOSAVE_KEY = 'hex-worldmaker:autosave:v1';
 const LIBRARY_KEY = 'hex-worldmaker:library:v1';
+export const MIN_MAP_DIM = 10;
+export const MAX_MAP_DIM = 2000;
 
 export interface SavedMapSummary {
   id: string;
@@ -30,8 +32,20 @@ export interface SavedMapSummary {
   cityCount: number;
 }
 
-/** Serialize HexMapData cleanly to formatted JSON. */
+/** Serialize HexMapData cleanly to compact JSON (fast, small footprint for autosave/large maps). */
+export function serializeMapCompact(map: HexMapData): string {
+  return JSON.stringify({
+    ...map,
+    version: 1,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Serialize HexMapData to JSON (compact automatically on very large maps > 45,000 hexes). */
 export function serializeMapToJson(map: HexMapData): string {
+  if (map.width * map.height > 45000) {
+    return serializeMapCompact(map);
+  }
   return JSON.stringify(
     {
       ...map,
@@ -61,11 +75,11 @@ export function parseMapFromJson(raw: string): HexMapData {
   const height = Number(obj.height);
   const hexSizeKm = Number(obj.hexSizeKm);
 
-  if (!Number.isInteger(width) || width < 10 || width > 400) {
-    throw new Error('ความกว้างแผนที่ (width) ต้องอยู่ระหว่าง 10 ถึง 400 ช่อง');
+  if (!Number.isInteger(width) || width < MIN_MAP_DIM || width > MAX_MAP_DIM) {
+    throw new Error(`ความกว้างแผนที่ (width) ต้องอยู่ระหว่าง ${MIN_MAP_DIM} ถึง ${MAX_MAP_DIM} ช่อง`);
   }
-  if (!Number.isInteger(height) || height < 10 || height > 400) {
-    throw new Error('ความสูงแผนที่ (height) ต้องอยู่ระหว่าง 10 ถึง 400 ช่อง');
+  if (!Number.isInteger(height) || height < MIN_MAP_DIM || height > MAX_MAP_DIM) {
+    throw new Error(`ความสูงแผนที่ (height) ต้องอยู่ระหว่าง ${MIN_MAP_DIM} ถึง ${MAX_MAP_DIM} ช่อง`);
   }
   if (!Number.isFinite(hexSizeKm) || hexSizeKm <= 0) {
     throw new Error('ขนาดระยะทางต่อช่อง (hexSizeKm) ต้องมากกว่า 0 กม.');
@@ -389,9 +403,9 @@ export function resizeMap(
   newHexSizeKm: number,
   mode: 'preserve' | 'regenerate'
 ): HexMapData {
-  const safeW = Math.max(20, Math.min(300, Math.round(newWidth)));
-  const safeH = Math.max(20, Math.min(240, Math.round(newHeight)));
-  const safeKm = Math.max(0.5, Math.min(500, Number(newHexSizeKm)));
+  const safeW = Math.max(MIN_MAP_DIM, Math.min(MAX_MAP_DIM, Math.round(newWidth)));
+  const safeH = Math.max(MIN_MAP_DIM, Math.min(MAX_MAP_DIM, Math.round(newHeight)));
+  const safeKm = Math.max(0.1, Math.min(5000, Number(newHexSizeKm)));
 
   if (mode === 'regenerate') {
     const fresh = generateWorld(safeW, safeH, safeKm, map.geography, map.name);
@@ -583,8 +597,10 @@ export function resizeMap(
 }
 
 export function saveAutosave(map: HexMapData): void {
+  // Skip autosaving oversized maps (> 90k hexes) that exceed ~5MB localStorage quota and stall JSON serialization
+  if (map.width * map.height > 90000) return;
   try {
-    localStorage.setItem(AUTOSAVE_KEY, serializeMapToJson(map));
+    localStorage.setItem(AUTOSAVE_KEY, serializeMapCompact(map));
   } catch {
     // Ignore storage quota errors gracefully
   }
@@ -631,7 +647,7 @@ export function listSavedMaps(): SavedMapSummary[] {
 export function saveMapToLibrary(map: HexMapData): void {
   const raw = localStorage.getItem(LIBRARY_KEY);
   const dict: Record<string, string> = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-  dict[map.id] = serializeMapToJson(map);
+  dict[map.id] = serializeMapCompact(map);
   localStorage.setItem(LIBRARY_KEY, JSON.stringify(dict));
 }
 

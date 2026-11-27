@@ -60,6 +60,8 @@ import {
 
 export const BASE_HEX_RADIUS = 18;
 export const CHUNK_SIZE = 16;
+const MAX_CACHED_CHUNKS = 140;
+const MAX_CHUNKS_PER_FRAME = 10;
 
 function hash2D(q: number, r: number): number {
   let h = (q * 374761393 + r * 668265263) ^ 0x5bf03635;
@@ -1185,6 +1187,16 @@ export class ChunkedMapRenderer {
   private lastSizeKey = '';
   private lastOverlay: ClimateOverlay = 'none';
   private lastFlagsKey = '';
+  private overviewCanvas: HTMLCanvasElement | null = null;
+  private overviewKey = '';
+  private chokepointsCache: {
+    key: string;
+    items: ReturnType<typeof detectStrategicChokepoints>;
+  } | null = null;
+  private centroidCache: {
+    key: string;
+    items: { x: number; y: number; name: string; color: string; sub?: string }[];
+  } | null = null;
   private currentCache: {
     key: string;
     field: OceanCurrentField;
@@ -1286,6 +1298,10 @@ export class ChunkedMapRenderer {
 
   public invalidateAll(): void {
     this.chunks.clear();
+    this.overviewCanvas = null;
+    this.overviewKey = '';
+    this.chokepointsCache = null;
+    this.centroidCache = null;
     this.currentCache = null;
     this.windCache = null;
   }
@@ -1304,7 +1320,199 @@ export class ChunkedMapRenderer {
     for (const key of touched) {
       this.chunks.delete(key);
     }
+    this.overviewCanvas = null;
+    this.overviewKey = '';
+    this.chokepointsCache = null;
+    this.centroidCache = null;
     this.currentCache = null;
+  }
+
+  private getChokepoints(map: HexMapData): ReturnType<typeof detectStrategicChokepoints> {
+    const key = `${map.id}_${map.width}x${map.height}_${map.updatedAt}`;
+    if (this.chokepointsCache && this.chokepointsCache.key === key) {
+      return this.chokepointsCache.items;
+    }
+    const items = detectStrategicChokepoints(map, 20);
+    this.chokepointsCache = { key, items };
+    return items;
+  }
+
+  private getCentroidLabels(
+    map: HexMapData,
+    overlay: ClimateOverlay,
+    layers: LayerVisibility
+  ): { x: number; y: number; name: string; color: string; sub?: string }[] {
+    let mode: 'political' | 'religion' | 'culture' | null = null;
+    if (overlay === 'political') mode = 'political';
+    else if (overlay === 'religion' || layers.religions) mode = 'religion';
+    else if (overlay === 'culture' || layers.cultures) mode = 'culture';
+    if (!mode) return [];
+
+    const key = `${map.id}_${map.width}x${map.height}_${map.updatedAt}_${mode}_${overlay}`;
+    if (this.centroidCache && this.centroidCache.key === key) {
+      return this.centroidCache.items;
+    }
+
+    let assignments: string[] = [];
+    let defs: { id: string; name: string; color: string; sub?: string }[] = [];
+    if (mode === 'political') {
+      const govMap = new Map(
+        getAllGovernmentTypes(map.customGovernmentTypes).map((g) => [g.id, g.label])
+      );
+      assignments = map.territories;
+      defs = map.kingdoms.map((k) => ({
+        id: k.id,
+        name: k.name,
+        color: k.color,
+        sub: govMap.get(k.government) ?? k.government,
+      }));
+    } else if (mode === 'religion') {
+      assignments = map.religions;
+      defs = map.religionList.map((r) => ({
+        id: r.id,
+        name: `${r.symbol} ${r.name}`,
+        color: r.color,
+      }));
+    } else {
+      const cultTypeMap = new Map(
+        getAllCultureTypes(map.customCultureTypes).map((ct) => [ct.id, ct.label])
+      );
+      assignments = map.cultures ?? [];
+      defs = (map.cultureList ?? []).map((c) => ({
+        id: c.id,
+        name: `${c.symbol} ${c.name}`,
+        color: c.color,
+        sub: overlay === 'culture' ? cultTypeMap.get(c.type) ?? c.type : undefined,
+      }));
+    }
+
+    const items = computeCentroidLabelPositions(map, assignments, defs);
+    this.centroidCache = { key, items };
+    return items;
+  }
+
+  private getOrBuildOverview(
+    map: HexMapData,
+    overlay: ClimateOverlay,
+    layers: LayerVisibility,
+    mapTheme: MapTheme,
+    activeSeason?: SeasonId | null
+  ): HTMLCanvasElement {
+    const key = `${this.lastMapId}_${this.lastSizeKey}_${this.lastOverlay}_${this.lastFlagsKey}`;
+    if (this.overviewCanvas && this.overviewKey === key) {
+      return this.overviewCanvas;
+    }
+
+    const ovW = Math.min(1200, Math.max(240, map.width * 2));
+    const ovH = Math.min(840, Math.max(160, map.height * 2));
+    const canvas = this.overviewCanvas ?? document.createElement('canvas');
+    canvas.width = ovW;
+    canvas.height = ovH;
+    const ctx = canvas.getContext('2d')!;
+    const img = ctx.createImageData(ovW, ovH);
+    const data = img.data;
+
+    const biomeRgb = new Map<number, [number, number, number]>();
+    const biomeWaterSet = new Set<number>();
+    for (const b of getPaintableBiomes(map.customBiomes)) {
+      biomeRgb.set(b.id, hexToRgb(b.color));
+      if (b.isWater) biomeWaterSet.add(b.id);
+    }
+    const terrainRgb = new Map<number, [number, number, number]>();
+    const terrainWaterSet = new Set<number>();
+    for (const t of getAllTerrains(map.customTerrains, map.terrainOverrides)) {
+      terrainRgb.set(t.id, hexToRgb(t.color));
+      if (t.isWater) terrainWaterSet.add(t.id);
+    }
+    const kingdomRgb = new Map(map.kingdoms.map((k) => [k.id, hexToRgb(k.color)]));
+    const religionRgb = new Map(map.religionList.map((r) => [r.id, hexToRgb(r.color)]));
+    const cultureRgb = new Map((map.cultureList ?? []).map((c) => [c.id, hexToRgb(c.color)]));
+
+    const tectonicField =
+      overlay === 'tectonics' || layers.tectonics ? this.getTectonicData(map) : null;
+    const plateRgb = tectonicField
+      ? tectonicField.plates.map((p) => hexToRgb(p.color))
+      : [];
+    const currentField = overlay === 'currents' ? this.getCurrentData(map).field : null;
+    const windField = overlay === 'winds' ? this.getWindData(map, activeSeason).field : null;
+    const seasonalField = activeSeason ? this.getSeasonalData(map, activeSeason) : null;
+
+    for (let py = 0; py < ovH; py++) {
+      const r = Math.min(map.height - 1, Math.floor((py / ovH) * map.height));
+      for (let px = 0; px < ovW; px++) {
+        const q = Math.min(map.width - 1, Math.floor((px / ovW) * map.width));
+        const idx = hexIndex(q, r, map.width);
+        const biomeId = map.biomes[idx];
+        const terrainId = getHexTerrain(map, idx);
+        const isWater = terrainWaterSet.has(terrainId) || biomeWaterSet.has(biomeId);
+
+        let rgb: [number, number, number] =
+          biomeRgb.get(biomeId) ??
+          terrainRgb.get(terrainId) ??
+          (isWater ? [26, 72, 112] : [92, 128, 86]);
+
+        if (overlay === 'terrain') {
+          rgb = terrainRgb.get(terrainId) ?? rgb;
+        } else if (overlay === 'elevation') {
+          rgb = hexToRgb(elevationColor(map.elevation[idx] ?? 0));
+        } else if (overlay === 'temperature') {
+          const temp = seasonalField ? seasonalField.temperature[idx] : (map.temperature[idx] ?? 15);
+          rgb = hexToRgb(temperatureColor(temp));
+        } else if (overlay === 'moisture') {
+          rgb = hexToRgb(moistureColor(map.moisture[idx] ?? 0.5));
+        } else if (overlay === 'tectonics' && tectonicField) {
+          const pCol = plateRgb[tectonicField.plateIds[idx]] ?? [100, 116, 139];
+          rgb = isWater
+            ? mixRgbTuple(pCol, [18, 32, 52], 0.55)
+            : mixRgbTuple(pCol, [235, 232, 224], 0.25);
+        } else if (overlay === 'currents' && currentField) {
+          rgb =
+            terrainId === TerrainId.LAKE
+              ? [59, 142, 194]
+              : isWater
+              ? hexToRgb(oceanCurrentFillColor(currentField.thermal[idx], currentField.speed[idx]))
+              : [42, 50, 62];
+        } else if (overlay === 'winds' && windField) {
+          rgb = hexToRgb(windFillColor(windField.belt[idx], windField.speed[idx], isWater));
+        } else if (overlay === 'none' && !isWater) {
+          if (terrainId === TerrainId.HIGH_PEAK) rgb = [212, 220, 228];
+          else if (terrainId === TerrainId.MOUNTAIN) rgb = [118, 108, 94];
+          else if (terrainId === TerrainId.HIGHLAND) rgb = mixRgbTuple(rgb, [166, 148, 118], 0.42);
+        }
+
+        if (overlay === 'political' || layers.territories) {
+          const owner = map.territories?.[idx];
+          const kCol = owner ? kingdomRgb.get(owner) : undefined;
+          if (kCol) rgb = mixRgbTuple(rgb, kCol, overlay === 'political' ? 0.58 : 0.2);
+        }
+        if (overlay === 'religion' || layers.religions) {
+          const rid = map.religions?.[idx];
+          const rCol = rid ? religionRgb.get(rid) : undefined;
+          if (rCol) rgb = mixRgbTuple(rgb, rCol, overlay === 'religion' ? 0.52 : 0.2);
+        }
+        if (overlay === 'culture' || layers.cultures) {
+          const cid = map.cultures?.[idx];
+          const cCol = cid ? cultureRgb.get(cid) : undefined;
+          if (cCol) rgb = mixRgbTuple(rgb, cCol, overlay === 'culture' ? 0.52 : 0.2);
+        }
+        if (mapTheme === 'parchment') {
+          rgb = mixRgbTuple(rgb, [214, 196, 158], 0.48);
+        } else if (mapTheme === 'dark') {
+          rgb = mixRgbTuple(rgb, [10, 16, 26], 0.34);
+        }
+
+        const p = (py * ovW + px) * 4;
+        data[p] = rgb[0];
+        data[p + 1] = rgb[1];
+        data[p + 2] = rgb[2];
+        data[p + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+    this.overviewCanvas = canvas;
+    this.overviewKey = key;
+    return canvas;
   }
 
   private getOrBuildChunk(
@@ -1328,7 +1536,16 @@ export class ChunkedMapRenderer {
 
     const key = `${cq},${cr}`;
     const existing = this.chunks.get(key);
-    if (existing) return { canvas: existing, originX, originY };
+    if (existing) {
+      this.chunks.delete(key);
+      this.chunks.set(key, existing);
+      return { canvas: existing, originX, originY };
+    }
+    while (this.chunks.size >= MAX_CACHED_CHUNKS) {
+      const oldestKey = this.chunks.keys().next().value;
+      if (oldestKey !== undefined) this.chunks.delete(oldestKey);
+      else break;
+    }
 
     const chunkW = Math.ceil(CHUNK_SIZE * SQRT3 * BASE_HEX_RADIUS + pad * 2.6);
     const chunkH = Math.ceil(CHUNK_SIZE * 1.5 * BASE_HEX_RADIUS + pad * 2.6);
@@ -1765,7 +1982,7 @@ export class ChunkedMapRenderer {
       submapDraftBox?: { minQ: number; maxQ: number; minR: number; maxR: number } | null;
       selectedTectonicPlateId?: string | null;
     }
-  ): void {
+  ): boolean {
     const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
     const activeSeason = options.activeSeason ?? null;
     const sizeKey = `${map.width}x${map.height}`;
@@ -1822,23 +2039,65 @@ export class ChunkedMapRenderer {
     const cStartY = Math.max(0, Math.floor(minWY / chunkPixelH) - 1);
     const cEndY = Math.min(totalChunksY - 1, Math.ceil(maxWY / chunkPixelH) + 1);
 
-    for (let cr = cStartY; cr <= cEndY; cr++) {
-      for (let cq = cStartX; cq <= cEndX; cq++) {
-        const { canvas, originX, originY } = this.getOrBuildChunk(
+    const mapPixelW = map.width * SQRT3 * BASE_HEX_RADIUS + BASE_HEX_RADIUS;
+    const mapPixelH = map.height * 1.5 * BASE_HEX_RADIUS + BASE_HEX_RADIUS;
+    const visibleChunkCount = Math.max(0, cEndX - cStartX + 1) * Math.max(0, cEndY - cStartY + 1);
+    let hasPendingChunks = false;
+
+    if (cam.zoom < 0.24 && visibleChunkCount > 64) {
+      const overview = this.getOrBuildOverview(
+        map,
+        options.overlay,
+        options.layers,
+        mapTheme,
+        activeSeason
+      );
+      ctx.drawImage(overview, -BASE_HEX_RADIUS, -BASE_HEX_RADIUS, mapPixelW, mapPixelH);
+    } else {
+      let anyMissing = false;
+      for (let cr = cStartY; cr <= cEndY && !anyMissing; cr++) {
+        for (let cq = cStartX; cq <= cEndX; cq++) {
+          if (!this.chunks.has(`${cq},${cr}`)) {
+            anyMissing = true;
+            break;
+          }
+        }
+      }
+      if (anyMissing) {
+        const overview = this.getOrBuildOverview(
           map,
-          cq,
-          cr,
           options.overlay,
           options.layers,
           mapTheme,
           activeSeason
         );
-        ctx.drawImage(canvas, originX, originY);
+        ctx.drawImage(overview, -BASE_HEX_RADIUS, -BASE_HEX_RADIUS, mapPixelW, mapPixelH);
+      }
+
+      let builtThisFrame = 0;
+      for (let cr = cStartY; cr <= cEndY; cr++) {
+        for (let cq = cStartX; cq <= cEndX; cq++) {
+          const cKey = `${cq},${cr}`;
+          if (!this.chunks.has(cKey)) {
+            if (builtThisFrame >= MAX_CHUNKS_PER_FRAME) {
+              hasPendingChunks = true;
+              continue;
+            }
+            builtThisFrame++;
+          }
+          const { canvas, originX, originY } = this.getOrBuildChunk(
+            map,
+            cq,
+            cr,
+            options.overlay,
+            options.layers,
+            mapTheme,
+            activeSeason
+          );
+          ctx.drawImage(canvas, originX, originY);
+        }
       }
     }
-
-    const mapPixelW = map.width * SQRT3 * BASE_HEX_RADIUS + BASE_HEX_RADIUS;
-    const mapPixelH = map.height * 1.5 * BASE_HEX_RADIUS + BASE_HEX_RADIUS;
 
     // Optional reference sketch/trace image overlay
     if (options.refImage && options.refImage.complete && (options.refOpacity ?? 0) > 0) {
@@ -1871,25 +2130,28 @@ export class ChunkedMapRenderer {
       options.overlay === 'tectonics' || options.layers.tectonics || options.tool === 'tectonic'
         ? this.getTectonicData(map)
         : undefined;
+    const chokepoints = options.layers.chokepoints ? this.getChokepoints(map) : undefined;
+    const centroidLabels = this.getCentroidLabels(map, options.overlay, options.layers);
     drawDynamicLayers(ctx, map, cam.zoom, {
       ...options,
       mapTheme,
       currentStreams,
       windStreams,
       tectonicField,
+      chokepoints,
+      centroidLabels,
     });
 
     ctx.restore();
+    return hasPendingChunks;
   }
 }
 
-function drawCentroidLabels(
-  ctx: CanvasRenderingContext2D,
+function computeCentroidLabelPositions(
   map: HexMapData,
   assignments: string[],
-  items: { id: string; name: string; color: string; sub?: string }[],
-  zoom: number
-): void {
+  items: { id: string; name: string; color: string; sub?: string }[]
+): { x: number; y: number; name: string; color: string; sub?: string }[] {
   const acc = new Map<string, { sumX: number; sumY: number; count: number }>();
   for (let r = 0; r < map.height; r++) {
     for (let q = 0; q < map.width; q++) {
@@ -1906,14 +2168,28 @@ function drawCentroidLabels(
       }
     }
   }
-
-  const fontSize = Math.max(12, Math.min(24, Math.round(14 / Math.max(0.45, zoom * 0.8))));
+  const out: { x: number; y: number; name: string; color: string; sub?: string }[] = [];
   for (const item of items) {
     const stat = acc.get(item.id);
     if (!stat || stat.count < 3) continue;
-    const cx = stat.sumX / stat.count;
-    const cy = stat.sumY / stat.count;
+    out.push({
+      x: stat.sumX / stat.count,
+      y: stat.sumY / stat.count,
+      name: item.name,
+      color: item.color,
+      sub: item.sub,
+    });
+  }
+  return out;
+}
 
+function renderCentroidLabelList(
+  ctx: CanvasRenderingContext2D,
+  items: { x: number; y: number; name: string; color: string; sub?: string }[],
+  zoom: number
+): void {
+  const fontSize = Math.max(12, Math.min(24, Math.round(14 / Math.max(0.45, zoom * 0.8))));
+  for (const item of items) {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1921,15 +2197,25 @@ function drawCentroidLabels(
     ctx.shadowColor = 'rgba(0, 0, 0, 0.92)';
     ctx.shadowBlur = 7;
     ctx.fillStyle = '#f8fafc';
-    ctx.fillText(item.name, cx, cy);
+    ctx.fillText(item.name, item.x, item.y);
 
     if (item.sub) {
       ctx.font = `500 ${Math.max(10, fontSize - 4)}px Sarabun, sans-serif`;
       ctx.fillStyle = item.color;
-      ctx.fillText(item.sub, cx, cy + fontSize * 0.95);
+      ctx.fillText(item.sub, item.x, item.y + fontSize * 0.95);
     }
     ctx.restore();
   }
+}
+
+function drawCentroidLabels(
+  ctx: CanvasRenderingContext2D,
+  map: HexMapData,
+  assignments: string[],
+  items: { id: string; name: string; color: string; sub?: string }[],
+  zoom: number
+): void {
+  renderCentroidLabelList(ctx, computeCentroidLabelPositions(map, assignments, items), zoom);
 }
 
 function drawDynamicLayers(
@@ -1953,6 +2239,8 @@ function drawDynamicLayers(
     tectonicField?: TectonicField;
     submapDraftBox?: { minQ: number; maxQ: number; minR: number; maxR: number } | null;
     selectedTectonicPlateId?: string | null;
+    chokepoints?: ReturnType<typeof detectStrategicChokepoints>;
+    centroidLabels?: { x: number; y: number; name: string; color: string; sub?: string }[];
   }
 ): void {
   const { layers } = options;
@@ -2226,7 +2514,9 @@ function drawDynamicLayers(
   }
 
   // 2. Political & Religion centroid labels
-  if (options.overlay === 'political') {
+  if (options.centroidLabels) {
+    renderCentroidLabelList(ctx, options.centroidLabels, zoom);
+  } else if (options.overlay === 'political') {
     const govMap = new Map(
       getAllGovernmentTypes(map.customGovernmentTypes).map((g) => [g.id, g.label])
     );
@@ -2667,7 +2957,7 @@ function drawDynamicLayers(
 
   // 9c. Strategic Chokepoints Tactical Markers
   if (layers.chokepoints) {
-    const cps = detectStrategicChokepoints(map, 20);
+    const cps = options.chokepoints ?? detectStrategicChokepoints(map, 20);
     for (const cp of cps) {
       const p = hexToPixel(cp.q, cp.r, BASE_HEX_RADIUS);
       ctx.save();
@@ -2860,10 +3150,13 @@ export function exportMapToPng(
   const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
   const maxDim = Math.max(map.width, map.height);
   const baseHexRadius = maxDim > 200 ? 10 : maxDim > 140 ? 13 : 16;
-  const hexRadius = baseHexRadius * (options.scaleMultiplier === 2 ? 1.75 : 1);
+  const rawHexRadius = baseHexRadius * (options.scaleMultiplier === 2 ? 1.75 : 1);
   const padTop = options.ornateFrame ? 84 : 64;
   const padSide = options.ornateFrame ? 48 : 32;
   const legendW = options.includeLegend ? 240 : 0;
+  const maxRFromW = (8192 - padSide * 2 - legendW) / Math.max(1, map.width * SQRT3 + 2);
+  const maxRFromH = (8192 - padTop - padSide) / Math.max(1, map.height * 1.5 + 2);
+  const hexRadius = Math.max(2.5, Math.min(rawHexRadius, maxRFromW, maxRFromH));
 
   const mapW = Math.ceil(map.width * SQRT3 * hexRadius + hexRadius * 2);
   const mapH = Math.ceil(map.height * 1.5 * hexRadius + hexRadius * 2);

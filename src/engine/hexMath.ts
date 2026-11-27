@@ -212,7 +212,7 @@ export function floodFillHexes<T extends number | string>(
   height: number,
   startQ: number,
   startR: number,
-  maxCells = 12000,
+  maxCells = 80000,
   canTraverse?: (idx: number) => boolean
 ): HexCoord[] {
   if (!inBounds(startQ, startR, width, height)) return [];
@@ -555,7 +555,7 @@ export function findHexPath(
   push(hexDistance(start, goal) * 0.55, startIdx);
 
   let iterations = 0;
-  const maxIter = Math.min(total * 4, 220000);
+  const maxIter = Math.min(total * 4, 450000);
 
   while (heapF.length > 0 && iterations++ < maxIter) {
     const curIdx = pop();

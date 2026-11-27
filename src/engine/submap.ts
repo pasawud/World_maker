@@ -76,8 +76,8 @@ export function extractRegionalSubMap(
 
   const srcSpanW = maxQ - minQ + 1;
   const srcSpanH = maxR - minR + 1;
-  const outW = Math.max(20, Math.min(320, srcSpanW * scaleFactor));
-  const outH = Math.max(20, Math.min(240, srcSpanH * scaleFactor));
+  const outW = Math.max(20, Math.min(1000, srcSpanW * scaleFactor));
+  const outH = Math.max(20, Math.min(1000, srcSpanH * scaleFactor));
   const outHexKm = Number(Math.max(0.5, sourceMap.hexSizeKm / scaleFactor).toFixed(2));
   const total = outW * outH;
 

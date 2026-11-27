@@ -91,8 +91,13 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
     const kColors = new Map(map.kingdoms.map((k) => [k.id, k.color]));
     const cellW = cw / Math.max(1, map.width);
     const cellH = ch / Math.max(1, map.height);
-    for (let r = 0; r < map.height; r++) {
-      for (let q = 0; q < map.width; q++) {
+    const stepQ = Math.max(1, Math.floor(map.width / cw));
+    const stepR = Math.max(1, Math.floor(map.height / ch));
+    const drawW = Math.max(1, Math.ceil(cellW * stepQ));
+    const drawH = Math.max(1, Math.ceil(cellH * stepR));
+
+    for (let r = 0; r < map.height; r += stepR) {
+      for (let q = 0; q < map.width; q += stepQ) {
         const idx = r * map.width + q;
         const elev = map.elevation[idx] ?? 0;
         if (elev <= 0.01) {
@@ -104,13 +109,13 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
         } else {
           ctx.fillStyle = '#3f6a46';
         }
-        ctx.fillRect(q * cellW, r * cellH, Math.ceil(cellW), Math.ceil(cellH));
+        ctx.fillRect(q * cellW, r * cellH, drawW, drawH);
 
         const owner = map.territories?.[idx];
         const kc = owner ? kColors.get(owner) : undefined;
         if (kc) {
           ctx.fillStyle = `${kc}55`;
-          ctx.fillRect(q * cellW, r * cellH, Math.ceil(cellW), Math.ceil(cellH));
+          ctx.fillRect(q * cellW, r * cellH, drawW, drawH);
         }
       }
     }
@@ -158,8 +163,8 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
     const img = new window.Image();
     img.onload = () => {
       const c = document.createElement('canvas');
-      c.width = Math.min(512, img.naturalWidth || 256);
-      c.height = Math.min(512, img.naturalHeight || 256);
+      c.width = Math.min(1024, img.naturalWidth || 256);
+      c.height = Math.min(1024, img.naturalHeight || 256);
       const ctx = c.getContext('2d');
       if (!ctx) return;
       ctx.drawImage(img, 0, 0, c.width, c.height);
@@ -345,8 +350,8 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
                     <span className="text-slate-400">ขนาดผลลัพธ์:</span>
                     <input
                       type="number"
-                      min={30}
-                      max={220}
+                      min={10}
+                      max={1200}
                       value={targetW}
                       onChange={(e) => setTargetW(Number(e.target.value))}
                       className="w-16 bg-[#161f2c] border border-slate-700 rounded px-1.5 py-0.5"
@@ -354,8 +359,8 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
                     <span>×</span>
                     <input
                       type="number"
-                      min={20}
-                      max={160}
+                      min={10}
+                      max={1200}
                       value={targetH}
                       onChange={(e) => setTargetH(Number(e.target.value))}
                       className="w-16 bg-[#161f2c] border border-slate-700 rounded px-1.5 py-0.5"

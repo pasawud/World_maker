@@ -95,7 +95,12 @@ import {
   WorldTimeline,
 } from '../types/map';
 
-const MAX_HISTORY = 40;
+function getMaxHistory(m: HexMapData): number {
+  const total = m.width * m.height;
+  if (total > 150000) return 8;
+  if (total > 60000) return 15;
+  return 40;
+}
 
 export function useMapEditor() {
   const [map, setMap] = useState<HexMapData>(() => {
@@ -214,12 +219,36 @@ export function useMapEditor() {
   }, []);
 
   useEffect(() => {
-    setAutosaveStatus('saving');
-    const timer = window.setTimeout(() => {
-      saveAutosave(map);
+    const total = map.width * map.height;
+    if (total > 90000) {
       setAutosaveStatus('saved');
-    }, 550);
-    return () => window.clearTimeout(timer);
+      return;
+    }
+    setAutosaveStatus('saving');
+    const delayMs = total > 50000 ? 2000 : 750;
+    let idleId: number | null = null;
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const timer = window.setTimeout(() => {
+      if (win.requestIdleCallback) {
+        idleId = win.requestIdleCallback(
+          () => {
+            saveAutosave(map);
+            setAutosaveStatus('saved');
+          },
+          { timeout: 1500 }
+        );
+      } else {
+        saveAutosave(map);
+        setAutosaveStatus('saved');
+      }
+    }, delayMs);
+    return () => {
+      window.clearTimeout(timer);
+      if (idleId !== null && win.cancelIdleCallback) win.cancelIdleCallback(idleId);
+    };
   }, [map]);
 
   const commitMapChange = useCallback(
@@ -227,7 +256,8 @@ export function useMapEditor() {
       setMap((prev) => {
         const next = updater(prev);
         if (next === prev) return prev;
-        setUndoStack((u) => [...u.slice(-(MAX_HISTORY - 1)), prev]);
+        const limit = getMaxHistory(prev);
+        setUndoStack((u) => [...u.slice(-(limit - 1)), prev]);
         setRedoStack([]);
         return next;
       });
@@ -681,7 +711,8 @@ export function useMapEditor() {
         cur.religions.some((v, i) => v !== snap.religions[i]) ||
         (cur.cultures ?? []).some((v, i) => v !== (snap.cultures ?? [])[i]);
       if (diff) {
-        setUndoStack((u) => [...u.slice(-(MAX_HISTORY - 1)), snap]);
+        const limit = getMaxHistory(snap);
+        setUndoStack((u) => [...u.slice(-(limit - 1)), snap]);
         setRedoStack([]);
       }
       return cur;
@@ -2173,7 +2204,8 @@ export function useMapEditor() {
     const moved = tectonicDragMovedRef.current;
     tectonicDragMovedRef.current = false;
     if (snap && moved) {
-      setUndoStack((u) => [...u.slice(-(MAX_HISTORY - 1)), snap]);
+      const limit = getMaxHistory(snap);
+      setUndoStack((u) => [...u.slice(-(limit - 1)), snap]);
       setRedoStack([]);
     }
   }, []);

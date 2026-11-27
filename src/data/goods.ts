@@ -477,6 +477,22 @@ export const SCALE_PRESETS: ScalePreset[] = [
     height: 156,
     hexSizeKm: 50,
   },
+  {
+    id: 'giant',
+    name: 'ทวีปยักษ์ความละเอียดสูง',
+    description: '360 × 240 ช่อง · ช่องละ 20 กม.',
+    width: 360,
+    height: 240,
+    hexSizeKm: 20,
+  },
+  {
+    id: 'epic',
+    name: 'มหาภพ / โลกจัมโบ้',
+    description: '500 × 320 ช่อง · ช่องละ 25 กม.',
+    width: 500,
+    height: 320,
+    hexSizeKm: 25,
+  },
 ];
 
 export const LANDMASS_PRESETS: { id: LandmassType; label: string; desc: string }[] = [

@@ -32,8 +32,8 @@ export function convertHeightmapPixelsToMap(
   hexSizeKm: number,
   options: HeightmapImportOptions = {}
 ): HexMapData {
-  const safeW = Math.max(20, Math.min(240, Math.round(targetW)));
-  const safeH = Math.max(20, Math.min(180, Math.round(targetH)));
+  const safeW = Math.max(10, Math.min(1200, Math.round(targetW)));
+  const safeH = Math.max(10, Math.min(1200, Math.round(targetH)));
   const threshold = Math.max(0.05, Math.min(0.9, options.seaLevelThreshold ?? 0.38));
   const scale = Math.max(0.4, Math.min(1.8, options.elevationScale ?? 1.0));
   const invert = Boolean(options.invert);

@@ -325,26 +325,35 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
 
   const terrainCounts = useMemo(() => {
     const counts = new Map<number, number>();
+    if (!openSections.terrains) return counts;
     for (let i = 0; i < map.biomes.length; i++) {
       const tId = getHexTerrain(map, i);
       counts.set(tId, (counts.get(tId) ?? 0) + 1);
     }
     return counts;
-  }, [map]);
+  }, [map, openSections.terrains]);
 
   const biomeCounts = useMemo(() => {
     const counts = new Map<number, number>();
+    if (!openSections.biomes) return counts;
     for (const b of map.biomes) counts.set(b, (counts.get(b) ?? 0) + 1);
     return counts;
-  }, [map.biomes]);
+  }, [map.biomes, openSections.biomes]);
 
   const landHexCount = useMemo(() => {
+    if (!openSections.summary) return 0;
+    const waterCache = new Map<number, boolean>();
     let n = 0;
     for (const b of map.biomes) {
-      if (!isWaterBiome(b, map.customBiomes)) n++;
+      let w = waterCache.get(b);
+      if (w === undefined) {
+        w = isWaterBiome(b, map.customBiomes);
+        waterCache.set(b, w);
+      }
+      if (!w) n++;
     }
     return n;
-  }, [map.biomes, map.customBiomes]);
+  }, [map.biomes, map.customBiomes, openSections.summary]);
 
   const dims = useMemo(
     () => computeRealDimensions(map.width, map.height, map.hexSizeKm),
@@ -357,9 +366,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     return counts;
   }, [map.pois]);
 
-  const territoryStats = useMemo(() => computeTerritoryStats(map), [map]);
-  const religionStats = useMemo(() => computeReligionStats(map), [map]);
-  const cultureStats = useMemo(() => computeCultureStats(map), [map]);
+  const territoryStats = useMemo(
+    () => (tool === 'territory' ? computeTerritoryStats(map) : []),
+    [map, tool]
+  );
+  const religionStats = useMemo(
+    () => (tool === 'religion' ? computeReligionStats(map) : []),
+    [map, tool]
+  );
+  const cultureStats = useMemo(
+    () => (tool === 'culture' ? computeCultureStats(map) : []),
+    [map, tool]
+  );
 
   const activeKingdom = map.kingdoms.find((k) => k.id === activeKingdomId) ?? map.kingdoms[0] ?? null;
   const activeReligion =

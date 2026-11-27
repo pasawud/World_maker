@@ -20,10 +20,10 @@ import {
   Waves,
   Wind,
 } from 'lucide-react';
-import { getBiomeMetaWithCustom } from '../data/biomes';
+import { getBiomeMetaWithCustom, getPaintableBiomes } from '../data/biomes';
 import { getFeatureMetaWithCustom } from '../data/features';
 import { getAllGovernmentTypes, getAllPoiTypes } from '../data/goods';
-import { getTerrainMetaWithCustom, isWaterTerrainWithCustom } from '../data/terrains';
+import { getAllTerrains, getTerrainMetaWithCustom, isWaterTerrainWithCustom } from '../data/terrains';
 import { computeSeasonalField } from '../engine/calendar';
 import {
   computeOceanCurrents,
@@ -58,6 +58,7 @@ import {
   formatLatitude,
   formatLongitude,
   getColLongitude,
+  getPrevailingWindVector,
   getRowLatitude,
 } from '../engine/worldGenerator';
 import {
@@ -322,6 +323,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const minimapRef = useRef<HTMLCanvasElement>(null);
+  const minimapCacheRef = useRef<HTMLCanvasElement | null>(null);
+  const hoverHexRef = useRef<HexCoord | null>(null);
   const rendererRef = useRef<ChunkedMapRenderer>(new ChunkedMapRenderer());
 
   const mapWorldW = map.width * SQRT3 * BASE_HEX_RADIUS;
@@ -333,6 +336,17 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     zoom: 0.55,
   }));
   const [viewSize, setViewSize] = useState({ w: 1000, h: 700 });
+  const minZoom = useMemo(
+    () =>
+      Math.min(
+        0.12,
+        Math.max(
+          0.02,
+          Math.min(viewSize.w / Math.max(1, mapWorldW), viewSize.h / Math.max(1, mapWorldH)) * 0.72
+        )
+      ),
+    [mapWorldH, mapWorldW, viewSize.h, viewSize.w]
+  );
   const [hoverHex, setHoverHex] = useState<HexCoord | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
 
@@ -365,7 +379,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const h = el.clientHeight;
     const zoomX = (w * 0.9) / Math.max(1, mapWorldW);
     const zoomY = (h * 0.9) / Math.max(1, mapWorldH);
-    const z = Math.max(0.14, Math.min(2.2, Math.min(zoomX, zoomY)));
+    const dynamicMin = Math.min(0.12, Math.max(0.02, Math.min(zoomX, zoomY) * 0.75));
+    const z = Math.max(dynamicMin, Math.min(2.2, Math.min(zoomX, zoomY)));
     setCam({ x: mapWorldW / 2, y: mapWorldH / 2, zoom: z });
   }, [mapWorldH, mapWorldW]);
 
@@ -464,37 +479,53 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const targetW = Math.max(1, Math.floor(viewSize.w * dpr));
-    const targetH = Math.max(1, Math.floor(viewSize.h * dpr));
-    if (canvas.width !== targetW || canvas.height !== targetH) {
-      canvas.width = targetW;
-      canvas.height = targetH;
-    }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let rafId = 0;
+    let cancelled = false;
 
-    ctx.save();
-    ctx.scale(dpr, dpr);
-    rendererRef.current.renderViewport(ctx, viewSize.w, viewSize.h, map, cam, {
-      overlay: climateOverlay,
-      layers,
-      hoverHex,
-      brushRadius: brushSize - 1,
-      tool,
-      selectedCityId,
-      tradeStartCityId,
-      draftPath,
-      previewPath,
-      measurePoints,
-      mapTheme: map.mapTheme ?? 'standard',
-      refImage: refImgEl,
-      refOpacity: referenceOverlay?.visible ? referenceOverlay.opacity : 0,
-      activeSeason,
-      submapDraftBox,
-      selectedTectonicPlateId: tectonicEditPlateId ?? selectedTectonicPlateId,
-    });
-    ctx.restore();
+    const drawFrame = () => {
+      if (cancelled) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const targetW = Math.max(1, Math.floor(viewSize.w * dpr));
+      const targetH = Math.max(1, Math.floor(viewSize.h * dpr));
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      const hasPendingChunks = rendererRef.current.renderViewport(ctx, viewSize.w, viewSize.h, map, cam, {
+        overlay: climateOverlay,
+        layers,
+        hoverHex,
+        brushRadius: brushSize - 1,
+        tool,
+        selectedCityId,
+        tradeStartCityId,
+        draftPath,
+        previewPath,
+        measurePoints,
+        mapTheme: map.mapTheme ?? 'standard',
+        refImage: refImgEl,
+        refOpacity: referenceOverlay?.visible ? referenceOverlay.opacity : 0,
+        activeSeason,
+        submapDraftBox,
+        selectedTectonicPlateId: tectonicEditPlateId ?? selectedTectonicPlateId,
+      });
+      ctx.restore();
+
+      if (hasPendingChunks && !cancelled) {
+        rafId = window.requestAnimationFrame(drawFrame);
+      }
+    };
+
+    rafId = window.requestAnimationFrame(drawFrame);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+    };
   }, [
     activeSeason,
     brushSize,
@@ -518,105 +549,180 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     viewSize,
   ]);
 
-  const oceanCurrentField = useMemo(
-    () =>
-      computeOceanCurrents(
-        map.width,
-        map.height,
-        map.elevation,
-        map.geography,
-        map.terrains,
-        map.manualCurrents
-      ),
-    [map.elevation, map.geography, map.height, map.manualCurrents, map.terrains, map.width]
-  );
-
-  const windField = useMemo(
-    () =>
-      computeWindField(
-        map.width,
-        map.height,
-        map.elevation,
-        map.geography,
-        map.manualWinds,
-        activeSeason
-      ),
-    [activeSeason, map.elevation, map.geography, map.height, map.manualWinds, map.width]
-  );
-
-  const tectonicField = useMemo(
-    () =>
-      computeTectonicField(
-        map.width,
-        map.height,
-        map.geography.seed,
-        map.geography.tectonicPlates ?? 8,
-        map.customTectonicPlates
-      ),
-    [
-      map.customTectonicPlates,
-      map.geography.seed,
-      map.geography.tectonicPlates,
-      map.height,
+  const oceanCurrentField = useMemo(() => {
+    if (climateOverlay !== 'currents' && !layers.currents && tool !== 'current') return null;
+    return computeOceanCurrents(
       map.width,
-    ]
-  );
+      map.height,
+      map.elevation,
+      map.geography,
+      map.terrains,
+      map.manualCurrents
+    );
+  }, [
+    climateOverlay,
+    layers.currents,
+    map.elevation,
+    map.geography,
+    map.height,
+    map.manualCurrents,
+    map.terrains,
+    map.width,
+    tool,
+  ]);
 
-  // Minimap
+  const windField = useMemo(() => {
+    if (climateOverlay !== 'winds' && !layers.winds && tool !== 'wind') return null;
+    return computeWindField(
+      map.width,
+      map.height,
+      map.elevation,
+      map.geography,
+      map.manualWinds,
+      activeSeason
+    );
+  }, [
+    activeSeason,
+    climateOverlay,
+    layers.winds,
+    map.elevation,
+    map.geography,
+    map.height,
+    map.manualWinds,
+    map.width,
+    tool,
+  ]);
+
+  const tectonicField = useMemo(() => {
+    if (climateOverlay !== 'tectonics' && !layers.tectonics && tool !== 'tectonic') return null;
+    return computeTectonicField(
+      map.width,
+      map.height,
+      map.geography.seed,
+      map.geography.tectonicPlates ?? 8,
+      map.customTectonicPlates
+    );
+  }, [
+    climateOverlay,
+    layers.tectonics,
+    map.customTectonicPlates,
+    map.geography.seed,
+    map.geography.tectonicPlates,
+    map.height,
+    map.width,
+    tool,
+  ]);
+
+  // Minimap Stage 1: build offscreen pixel-sampled terrain bitmap only when map data/overlay changes
   useEffect(() => {
     if (!showMinimap) return;
     const mini = minimapRef.current;
     if (!mini) return;
+    const mw = mini.width;
+    const mh = mini.height;
+
+    const cache = minimapCacheRef.current ?? document.createElement('canvas');
+    if (cache.width !== mw || cache.height !== mh) {
+      cache.width = mw;
+      cache.height = mh;
+    }
+    minimapCacheRef.current = cache;
+
+    const cctx = cache.getContext('2d');
+    if (!cctx) return;
+    const img = cctx.createImageData(mw, mh);
+    const data = img.data;
+
+    const parseRgb = (hex: string): [number, number, number] => {
+      const clean = hex.replace('#', '');
+      const n = parseInt(clean.length === 3 ? clean.replace(/(.)/g, '$1$1') : clean, 16);
+      if (!Number.isFinite(n)) return [60, 80, 100];
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    };
+
+    const terrainRgb = new Map<number, [number, number, number]>();
+    const terrainWaterSet = new Set<number>();
+    for (const t of getAllTerrains(map.customTerrains, map.terrainOverrides)) {
+      terrainRgb.set(t.id, parseRgb(t.color));
+      if (t.isWater) terrainWaterSet.add(t.id);
+    }
+    const biomeRgb = new Map<number, [number, number, number]>();
+    const biomeWaterSet = new Set<number>();
+    for (const b of getPaintableBiomes(map.customBiomes)) {
+      biomeRgb.set(b.id, parseRgb(b.color));
+      if (b.isWater) biomeWaterSet.add(b.id);
+    }
+    const kingdomRgb = new Map(map.kingdoms.map((k) => [k.id, parseRgb(k.color)]));
+    const religionRgb = new Map(map.religionList.map((r) => [r.id, parseRgb(r.color)]));
+    const cultureRgb = new Map((map.cultureList ?? []).map((c) => [c.id, parseRgb(c.color)]));
+    const plateRgb = tectonicField ? tectonicField.plates.map((pl) => parseRgb(pl.color)) : [];
+
+    for (let py = 0; py < mh; py++) {
+      const r = Math.min(map.height - 1, Math.floor((py / mh) * map.height));
+      for (let px = 0; px < mw; px++) {
+        const q = Math.min(map.width - 1, Math.floor((px / mw) * map.width));
+        const idx = hexIndex(q, r, map.width);
+        const tId = getHexTerrain(map, idx);
+        const bId = map.biomes[idx];
+        const isWater = terrainWaterSet.has(tId) || biomeWaterSet.has(bId);
+
+        let rgb: [number, number, number] =
+          climateOverlay === 'terrain'
+            ? terrainRgb.get(tId) ?? [60, 80, 100]
+            : climateOverlay === 'currents'
+            ? tId === TerrainId.LAKE
+              ? [59, 142, 194]
+              : isWater && oceanCurrentField
+              ? oceanCurrentField.thermal[idx] >= 0.2
+                ? [224, 99, 70]
+                : oceanCurrentField.thermal[idx] <= -0.2
+                ? [56, 189, 248]
+                : [27, 73, 110]
+              : [54, 65, 82]
+            : biomeWaterSet.has(bId) && bId < 100
+            ? terrainRgb.get(tId) ?? [24, 66, 106]
+            : biomeRgb.get(bId) ?? [84, 120, 82];
+
+        if (climateOverlay === 'none') {
+          if (tId === TerrainId.MOUNTAIN) rgb = [118, 107, 93];
+          else if (tId === TerrainId.HIGH_PEAK) rgb = [184, 196, 207];
+          if (map.features?.[idx] === 'cliff') rgb = [87, 78, 70];
+        }
+        if (climateOverlay === 'tectonics' && tectonicField) {
+          rgb = plateRgb[tectonicField.plateIds[idx]] ?? rgb;
+        } else if (climateOverlay === 'political' && map.territories?.[idx]) {
+          rgb = kingdomRgb.get(map.territories[idx]) ?? rgb;
+        } else if (climateOverlay === 'religion' && map.religions?.[idx]) {
+          rgb = religionRgb.get(map.religions[idx]) ?? rgb;
+        } else if (climateOverlay === 'culture' && map.cultures?.[idx]) {
+          rgb = cultureRgb.get(map.cultures[idx]) ?? rgb;
+        }
+
+        const p = (py * mw + px) * 4;
+        data[p] = rgb[0];
+        data[p + 1] = rgb[1];
+        data[p + 2] = rgb[2];
+        data[p + 3] = 255;
+      }
+    }
+    cctx.putImageData(img, 0, 0);
+  }, [climateOverlay, map, oceanCurrentField, renderVersion, showMinimap, tectonicField]);
+
+  // Minimap Stage 2: fast blit of cached bitmap + cities + camera viewport rect on pan/zoom
+  useEffect(() => {
+    if (!showMinimap) return;
+    const mini = minimapRef.current;
+    const cache = minimapCacheRef.current;
+    if (!mini || !cache) return;
     const ctx = mini.getContext('2d');
     if (!ctx) return;
 
     const mw = mini.width;
     const mh = mini.height;
-    ctx.fillStyle = '#0e1722';
-    ctx.fillRect(0, 0, mw, mh);
+    ctx.drawImage(cache, 0, 0);
 
     const sx = mw / map.width;
     const sy = mh / map.height;
-    for (let r = 0; r < map.height; r++) {
-      for (let q = 0; q < map.width; q++) {
-        const idx = hexIndex(q, r, map.width);
-        const tId = getHexTerrain(map, idx);
-        const tMeta = getTerrainMetaWithCustom(tId, map.customTerrains, map.terrainOverrides);
-        const bMeta = getBiomeMetaWithCustom(map.biomes[idx], map.customBiomes);
-        let color =
-          climateOverlay === 'terrain'
-            ? tMeta.color
-            : climateOverlay === 'currents'
-            ? tId === TerrainId.LAKE
-              ? '#3b8ec2'
-              : bMeta.isWater || isWaterTerrainWithCustom(tId, map.customTerrains, map.terrainOverrides)
-              ? oceanCurrentField.thermal[idx] >= 0.2
-                ? '#e06346'
-                : oceanCurrentField.thermal[idx] <= -0.2
-                ? '#38bdf8'
-                : '#1b496e'
-              : '#364152'
-            : bMeta.isWater && !bMeta.isCustom
-            ? tMeta.color
-            : bMeta.color;
-        if (climateOverlay === 'none') {
-          if (tId === TerrainId.MOUNTAIN) color = '#766b5d';
-          else if (tId === TerrainId.HIGH_PEAK) color = '#b8c4cf';
-          if (map.features?.[idx] === 'cliff') color = '#574e46';
-        }
-        if (climateOverlay === 'tectonics') {
-          color = tectonicField.plates[tectonicField.plateIds[idx]]?.color ?? color;
-        } else if (climateOverlay === 'political' && map.territories?.[idx]) {
-          color = map.kingdoms.find((k) => k.id === map.territories[idx])?.color ?? color;
-        } else if (climateOverlay === 'religion' && map.religions?.[idx]) {
-          color = map.religionList.find((rl) => rl.id === map.religions[idx])?.color ?? color;
-        } else if (climateOverlay === 'culture' && map.cultures?.[idx]) {
-          color = (map.cultureList ?? []).find((cu) => cu.id === map.cultures[idx])?.color ?? color;
-        }
-        ctx.fillStyle = color;
-        ctx.fillRect(q * sx, r * sy, Math.ceil(sx), Math.ceil(sy));
-      }
-    }
 
     ctx.fillStyle = '#fbbf24';
     for (const c of map.cities) {
@@ -635,7 +741,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     ctx.strokeStyle = '#fbbf24';
     ctx.lineWidth = 1.5;
     ctx.strokeRect(vx, vy, vw, vh);
-  }, [cam, climateOverlay, map, mapWorldH, mapWorldW, renderVersion, showMinimap, viewSize]);
+  }, [cam, climateOverlay, map.cities, map.height, map.width, mapWorldH, mapWorldW, renderVersion, showMinimap, viewSize]);
 
   const screenToWorld = useCallback(
     (clientX: number, clientY: number): { wx: number; wy: number } | null => {
@@ -671,7 +777,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const my = e.clientY - rect.top;
 
     const factor = e.deltaY < 0 ? 1.14 : 0.88;
-    const nextZoom = Math.max(0.12, Math.min(4.0, cam.zoom * factor));
+    const nextZoom = Math.max(minZoom, Math.min(4.0, cam.zoom * factor));
     const wx = (mx - viewSize.w / 2) / cam.zoom + cam.x;
     const wy = (my - viewSize.h / 2) / cam.zoom + cam.y;
     const nextX = wx - (mx - viewSize.w / 2) / nextZoom;
@@ -711,6 +817,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       }
 
       if (tectonicSubTool === 'erase') {
+        if (!tectonicField) return;
         if (editablePlates.length <= 2) {
           warnOnce('ต้องมีแผ่นเปลือกโลกอย่างน้อย 2 แผ่น');
           return;
@@ -746,6 +853,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         }
       }
 
+      if (!tectonicField) return;
       const pIdx = tectonicField.plateIds[hexIndex(h.q, h.r, map.width)];
       const clickedId = editablePlates[pIdx]?.id ?? null;
       onSelectTectonicPlate?.(clickedId);
@@ -933,7 +1041,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     }
 
     const h = screenToHex(e.clientX, e.clientY);
-    setHoverHex(h);
+    const prevHover = hoverHexRef.current;
+    if (h?.q !== prevHover?.q || h?.r !== prevHover?.r) {
+      hoverHexRef.current = h;
+      setHoverHex(h);
+    }
 
     if (tectonicDragRef.current) {
       const drag = tectonicDragRef.current;
@@ -1177,19 +1289,38 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const elevLabel = formatElevationMeters(map.elevation[idx] ?? 0);
     const temp = seasonalField ? seasonalField.temperature[idx] : (map.temperature[idx] ?? 15);
     const moist = Math.round((map.moisture[idx] ?? 0.5) * 2400);
-    const latStr = formatLatitude(getRowLatitude(hoverHex.r, map.height, map.geography));
-    const lonStr = formatLongitude(getColLongitude(hoverHex.q, map.width, map.geography));
+    const lat = getRowLatitude(hoverHex.r, map.height, map.geography);
+    const lon = getColLongitude(hoverHex.q, map.width, map.geography);
+    const latStr = formatLatitude(lat);
+    const lonStr = formatLongitude(lon);
     const isOceanHex =
       terrain.id === TerrainId.DEEP_OCEAN || terrain.id === TerrainId.SHALLOW_WATER;
-    const curKind = isOceanHex
-      ? getCurrentKind(oceanCurrentField.thermal[idx], oceanCurrentField.speed[idx])
-      : 'none';
-    const curDir = isOceanHex
-      ? getCurrentCompassLabel(oceanCurrentField.dx[idx], oceanCurrentField.dy[idx])
-      : '';
-    const wSpd = windField.speed[idx] ?? 0.5;
-    const wBelt = windField.belt[idx] ?? 2;
-    const windDir = getWindCompassLabel(windField.dx[idx], windField.dy[idx]);
+    const curKind =
+      isOceanHex && oceanCurrentField
+        ? getCurrentKind(oceanCurrentField.thermal[idx], oceanCurrentField.speed[idx])
+        : 'none';
+    const curDir =
+      isOceanHex && oceanCurrentField
+        ? getCurrentCompassLabel(oceanCurrentField.dx[idx], oceanCurrentField.dy[idx])
+        : '';
+    let wDx = 0;
+    let wDy = 0;
+    let wSpd = 0.5;
+    let wBelt = 2;
+    if (windField) {
+      wDx = windField.dx[idx];
+      wDy = windField.dy[idx];
+      wSpd = windField.speed[idx] ?? 0.5;
+      wBelt = windField.belt[idx] ?? 2;
+    } else {
+      const pv = getPrevailingWindVector(lat, lon, map.geography.windMode);
+      wDx = pv.dx;
+      wDy = pv.dy;
+      wSpd = Math.min(1.5, Math.hypot(wDx, wDy) * (map.geography.windStrength ?? 1));
+      const absLat = Math.abs(lat);
+      wBelt = absLat < 30 ? 1 : absLat < 60 ? 2 : 3;
+    }
+    const windDir = getWindCompassLabel(wDx, wDy);
     const windKnots = windSpeedKnots(wSpd);
     const windLabel = getWindBeltLabelTh(wBelt, wSpd);
     const city = map.cities.find((c) => c.q === hoverHex.q && c.r === hoverHex.r);
@@ -1946,7 +2077,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           <Plus className="w-4 h-4" />
         </button>
         <button
-          onClick={() => setCam((c) => ({ ...c, zoom: Math.max(0.12, c.zoom * 0.8) }))}
+          onClick={() => setCam((c) => ({ ...c, zoom: Math.max(minZoom, c.zoom * 0.8) }))}
           className="p-1.5 rounded hover:bg-slate-800 text-slate-200 cursor-pointer"
           title="ซูมออก"
         >
