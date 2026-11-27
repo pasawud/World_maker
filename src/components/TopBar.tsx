@@ -106,175 +106,178 @@ export const TopBar: React.FC<TopBarProps> = ({
   const [draftName, setDraftName] = useState(map.name);
 
   return (
-    <header className="h-11 bg-[#111720] border-b border-slate-800/90 px-2.5 flex items-center justify-between gap-2 select-none shrink-0 z-20">
-      {/* Left: Library + Map Name + Dimensions */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          onClick={onOpenLibrary}
-          className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#18212d] hover:bg-[#222e3e] border border-slate-700/80 text-xs text-slate-200 transition cursor-pointer shrink-0"
-          title="คลังแผนที่และนำเข้า/ส่งออก"
-        >
-          <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
-          <span className="hidden xl:inline">คลังแผนที่</span>
-        </button>
-
-        {map.parentMapLink && onOpenParentMap && (
+    <header className="bg-[#111720] border-b border-slate-800/90 select-none shrink-0 z-30 flex flex-col">
+      {/* Row 1: Title & Global Actions */}
+      <div className="min-h-10 py-1 px-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-slate-800/70">
+        {/* Left: Library + Map Name + Dimensions */}
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
           <button
-            onClick={onOpenParentMap}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-[11px] text-sky-200 font-medium transition cursor-pointer shrink-0"
-            title={`กลับไปยังแผนที่โลกหลัก: ${map.parentMapLink.parentMapName}`}
+            onClick={onOpenLibrary}
+            className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#18212d] hover:bg-[#222e3e] border border-slate-700/80 text-xs text-slate-200 transition cursor-pointer shrink-0"
+            title="คลังแผนที่และนำเข้า/ส่งออก"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">กลับแผนที่หลัก</span>
+            <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">คลังแผนที่</span>
           </button>
-        )}
 
-        {editingTitle ? (
-          <input
-            autoFocus
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            onBlur={() => {
-              setEditingTitle(false);
-              if (draftName.trim()) onRenameMap(draftName.trim());
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+          {map.parentMapLink && onOpenParentMap && (
+            <button
+              onClick={onOpenParentMap}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-[11px] text-sky-200 font-medium transition cursor-pointer shrink-0"
+              title={`กลับไปยังแผนที่โลกหลัก: ${map.parentMapLink.parentMapName}`}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">กลับแผนที่หลัก</span>
+            </button>
+          )}
+
+          {editingTitle ? (
+            <input
+              autoFocus
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={() => {
                 setEditingTitle(false);
                 if (draftName.trim()) onRenameMap(draftName.trim());
-              }
-            }}
-            className="bg-[#1c2635] border border-amber-500/70 rounded px-2 py-0.5 text-sm font-semibold text-amber-100 outline-none w-40"
-          />
-        ) : (
-          <button
-            onClick={() => {
-              setDraftName(map.name);
-              setEditingTitle(true);
-            }}
-            className="text-sm font-semibold text-amber-100 hover:text-amber-300 truncate max-w-[130px] cursor-pointer"
-            title="คลิกเพื่อเปลี่ยนชื่อแผนที่"
-          >
-            {map.name}
-          </button>
-        )}
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setEditingTitle(false);
+                  if (draftName.trim()) onRenameMap(draftName.trim());
+                }
+              }}
+              className="bg-[#1c2635] border border-amber-500/70 rounded px-2 py-0.5 text-sm font-semibold text-amber-100 outline-none w-40"
+            />
+          ) : (
+            <button
+              onClick={() => {
+                setDraftName(map.name);
+                setEditingTitle(true);
+              }}
+              className="text-sm font-semibold text-amber-100 hover:text-amber-300 truncate max-w-[160px] sm:max-w-[240px] cursor-pointer"
+              title="คลิกเพื่อเปลี่ยนชื่อแผนที่"
+            >
+              {map.name}
+            </button>
+          )}
 
-        <button
-          onClick={onOpenSizeModal}
-          className="hidden 2xl:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#161e29] hover:bg-[#1f2b3a] border border-slate-700/60 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer shrink-0"
-          title="ปรับแต่งขนาดแผนที่และมาตราส่วนระยะจริง"
-        >
-          <Compass className="w-3 h-3 text-amber-400/80" />
-          <span>
-            {map.width} × {map.height} · {map.hexSizeKm} กม.
+          <button
+            onClick={onOpenSizeModal}
+            className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#161e29] hover:bg-[#1f2b3a] border border-slate-700/60 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer shrink-0"
+            title="ปรับแต่งขนาดแผนที่และมาตราส่วนระยะจริง"
+          >
+            <Compass className="w-3 h-3 text-amber-400/80" />
+            <span>
+              {map.width} × {map.height} · {map.hexSizeKm} กม.
+            </span>
+          </button>
+        </div>
+
+        {/* Right: Undo/Redo + Autosave + Minimap + Generate CTA */}
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="ย้อนกลับ (Ctrl+Z)"
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+            {undoCount !== undefined && undoCount > 0 && (
+              <span className="text-[10px] text-amber-300 tabular-nums">{undoCount}</span>
+            )}
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="ทำซ้ำ (Ctrl+Y)"
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+            {redoCount !== undefined && redoCount > 0 && (
+              <span className="text-[10px] text-sky-300 tabular-nums">{redoCount}</span>
+            )}
+          </button>
+
+          <div className="h-5 w-px bg-slate-800 mx-0.5 shrink-0" />
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-emerald-400/90 mr-1">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                autosaveStatus === 'saving' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'
+              }`}
+            />
+            {autosaveStatus === 'saving' ? 'กำลังบันทึก...' : 'บันทึกแล้ว'}
           </span>
-        </button>
+
+          <button
+            onClick={onOpenQuickSearch}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] hover:bg-[#202c3b] border border-slate-800 text-slate-300 transition cursor-pointer"
+            title="ค้นหาด่วนและบุ๊กมาร์ก (Ctrl+K)"
+          >
+            <Search className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline text-[11px] text-slate-400">Ctrl+K</span>
+          </button>
+
+          <button
+            onClick={onToggleMinimap}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs border transition cursor-pointer ${
+              showMinimap
+                ? 'bg-slate-800 border-slate-600 text-slate-100'
+                : 'bg-[#17202b] border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+            title="เปิด/ปิดแผนที่ย่อ"
+          >
+            <MapIcon className="w-3.5 h-3.5" />
+          </button>
+
+          {onOpenShortcuts && (
+            <button
+              onClick={onOpenShortcuts}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] hover:bg-[#202c3b] border border-slate-800 text-slate-300 transition cursor-pointer"
+              title="คีย์ลัดและการควบคุม (?)"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-sky-300" />
+            </button>
+          )}
+
+          <button
+            onClick={onQuickGenerateWorld}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold text-xs transition shadow-sm cursor-pointer"
+            title="สุ่มสร้างโลกใหม่ทั้งแผนที่ตามหลักภูมิศาสตร์จริง"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>สร้างโลก</span>
+          </button>
+        </div>
       </div>
 
-      {/* Center: Grouped Tool Mode Switcher */}
-      <nav className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+      {/* Row 2: Full-Width Tool Mode Ribbon */}
+      <nav aria-label="เครื่องมือแผนที่" className="px-2.5 py-1 bg-[#0d131c] flex flex-wrap items-center gap-1.5">
         {TOOL_GROUPS.map((group, gIdx) => (
-          <React.Fragment key={gIdx}>
-            {gIdx > 0 && <div className="h-5 w-px bg-slate-800/90 mx-0.5 shrink-0" />}
-            <div className="flex items-center gap-0.5 bg-[#0d131b]/70 border border-slate-800/70 rounded-md p-0.5 shrink-0">
-              {group.map((item) => {
-                const active = tool === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => onSelectTool(item.id)}
-                    title={item.shortcut ? `${item.label} (คีย์ลัด ${item.shortcut})` : item.label}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 transition cursor-pointer ${
-                      active
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(217,155,56,0.18)]'
-                        : 'text-slate-300 hover:bg-[#1e2938] border border-transparent hover:border-slate-700/70'
-                    }`}
-                  >
-                    {item.icon}
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </React.Fragment>
+          <div
+            key={gIdx}
+            className="flex flex-wrap items-center gap-0.5 bg-[#0a0f16]/90 border border-slate-800/80 rounded-md p-0.5"
+          >
+            {group.map((item) => {
+              const active = tool === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectTool(item.id)}
+                  title={item.shortcut ? `${item.label} (คีย์ลัด ${item.shortcut})` : item.label}
+                  className={`flex items-center gap-1 px-1.5 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 transition cursor-pointer ${
+                    active
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(217,155,56,0.18)]'
+                      : 'text-slate-300 hover:bg-[#1e2938] border border-transparent hover:border-slate-700/70'
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         ))}
       </nav>
-
-      {/* Right: Undo/Redo + Autosave + Minimap + Generate CTA */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          onClick={onUndo}
-          disabled={!canUndo}
-          title="ย้อนกลับ (Ctrl+Z)"
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
-        >
-          <Undo2 className="w-3.5 h-3.5" />
-          {undoCount !== undefined && undoCount > 0 && (
-            <span className="text-[10px] text-amber-300 tabular-nums">{undoCount}</span>
-          )}
-        </button>
-        <button
-          onClick={onRedo}
-          disabled={!canRedo}
-          title="ทำซ้ำ (Ctrl+Y)"
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
-        >
-          <Redo2 className="w-3.5 h-3.5" />
-          {redoCount !== undefined && redoCount > 0 && (
-            <span className="text-[10px] text-sky-300 tabular-nums">{redoCount}</span>
-          )}
-        </button>
-
-        <div className="h-5 w-px bg-slate-800 mx-0.5 shrink-0" />
-        <span className="hidden 2xl:inline-flex items-center gap-1.5 text-[11px] text-emerald-400/90 mr-1">
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              autosaveStatus === 'saving' ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'
-            }`}
-          />
-          {autosaveStatus === 'saving' ? 'กำลังบันทึก...' : 'บันทึกแล้ว'}
-        </span>
-
-        <button
-          onClick={onOpenQuickSearch}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] hover:bg-[#202c3b] border border-slate-800 text-slate-300 transition cursor-pointer"
-          title="ค้นหาด่วนและบุ๊กมาร์ก (Ctrl+K)"
-        >
-          <Search className="w-3.5 h-3.5 text-amber-400" />
-          <span className="hidden xl:inline text-[11px] text-slate-400">Ctrl+K</span>
-        </button>
-
-        <button
-          onClick={onToggleMinimap}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-xs border transition cursor-pointer ${
-            showMinimap
-              ? 'bg-slate-800 border-slate-600 text-slate-100'
-              : 'bg-[#17202b] border-slate-800 text-slate-400 hover:text-slate-200'
-          }`}
-          title="เปิด/ปิดแผนที่ย่อ"
-        >
-          <MapIcon className="w-3.5 h-3.5" />
-        </button>
-
-        {onOpenShortcuts && (
-          <button
-            onClick={onOpenShortcuts}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] hover:bg-[#202c3b] border border-slate-800 text-slate-300 transition cursor-pointer"
-            title="คีย์ลัดและการควบคุม (?)"
-          >
-            <HelpCircle className="w-3.5 h-3.5 text-sky-300" />
-          </button>
-        )}
-
-        <button
-          onClick={onQuickGenerateWorld}
-          className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold text-xs transition shadow-sm cursor-pointer"
-          title="สุ่มสร้างโลกใหม่ทั้งแผนที่ตามหลักภูมิศาสตร์จริง"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>สร้างโลก</span>
-        </button>
-      </div>
     </header>
   );
 };

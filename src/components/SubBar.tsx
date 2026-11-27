@@ -124,7 +124,7 @@ export const SubBar: React.FC<SubBarProps> = ({
   const isAnalyticOverlay = ANALYTIC_VIEWS.some((v) => v.id === overlay);
 
   return (
-    <div className="min-h-9 py-1 bg-[#151d28] border-b border-slate-800/80 px-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs select-none shrink-0 z-20 relative">
+    <div className="min-h-9 py-1 bg-[#151d28] border-b border-slate-800/80 px-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs select-none shrink-0 z-40 relative">
       {/* Left: Clean View Modes + Analytic Dropdown + Compact Layers Popover */}
       <div className="flex flex-wrap items-center gap-1.5 min-w-0">
         <span className="hidden 2xl:flex items-center gap-1 text-amber-300/90 font-medium shrink-0">
@@ -132,7 +132,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           มุมมอง:
         </span>
 
-        <div className="flex items-center bg-[#0f1620] rounded border border-slate-800 p-0.5 gap-0.5 shrink-0 overflow-x-auto no-scrollbar max-w-full">
+        <div className="flex flex-wrap items-center bg-[#0f1620] rounded border border-slate-800 p-0.5 gap-0.5 max-w-full">
           {PRIMARY_VIEWS.map((m) => (
             <button
               key={m.id}
@@ -153,7 +153,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           onChange={(e) => {
             if (e.target.value) onChangeOverlay(e.target.value as ClimateOverlay);
           }}
-          className={`max-w-[130px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
+          className={`max-w-[120px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
             isAnalyticOverlay
               ? 'bg-sky-500/20 border-sky-400/60 text-sky-200 font-semibold'
               : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
@@ -173,7 +173,7 @@ export const SubBar: React.FC<SubBarProps> = ({
         <select
           value={mapTheme}
           onChange={(e) => onChangeMapTheme(e.target.value as MapTheme)}
-          className={`max-w-[125px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
+          className={`max-w-[115px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
             mapTheme !== 'standard'
               ? 'bg-amber-500/20 border-amber-400/60 text-amber-200 font-semibold'
               : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
@@ -196,7 +196,7 @@ export const SubBar: React.FC<SubBarProps> = ({
                 );
               }
             }}
-            className="hidden xl:block max-w-[120px] truncate px-2 py-0.5 rounded border border-slate-800 bg-[#0f1620] text-[11px] text-amber-200 outline-none cursor-pointer hover:border-slate-700 shrink-0"
+            className="hidden lg:block max-w-[110px] truncate px-2 py-0.5 rounded border border-slate-800 bg-[#0f1620] text-[11px] text-amber-200 outline-none cursor-pointer hover:border-slate-700 shrink-0"
             title="สลับพรีเซ็ตมุมมองและชั้นข้อมูลใน 1 คลิก"
           >
             <option value="" disabled className="bg-[#0f1620] text-slate-400">
@@ -232,7 +232,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           </button>
 
           {layersOpen && (
-            <div className="absolute left-0 top-full mt-1.5 w-72 sm:w-80 max-w-[calc(100vw-24px)] bg-[#131b26] border border-slate-700 rounded-xl shadow-2xl p-3 z-40">
+            <div className="absolute left-0 top-full mt-1.5 w-72 sm:w-80 max-w-[calc(100vw-24px)] bg-[#131b26] border border-slate-700 rounded-xl shadow-2xl p-3 z-50">
               <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
                 <span className="text-[11px] font-semibold text-amber-300">
                   ชั้นข้อมูลบนแผนที่ (Layers)
@@ -284,7 +284,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           onChange={(e) =>
             onChangeActiveSeason(e.target.value ? (e.target.value as SeasonId) : null)
           }
-          className={`max-w-[110px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
+          className={`max-w-[105px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
             activeSeason
               ? 'bg-sky-500/20 border-sky-400/60 text-sky-200 font-semibold'
               : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
@@ -357,7 +357,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           title="ปรับแต่งและสร้างภูมิประเทศ ไบโอม ลักษณะพิเศษ และ POI"
         >
           <Palette className="w-3 h-3 text-violet-400 shrink-0" />
-          <span className="hidden 2xl:inline">ปรับแต่งโลก</span>
+          <span className="hidden xl:inline">ปรับแต่ง</span>
         </button>
 
         <button
@@ -375,17 +375,16 @@ export const SubBar: React.FC<SubBarProps> = ({
           title="นำเข้าภาพ Heightmap / ภาพร่างลอกลาย และเจาะแผนที่ภูมิภาค Sub-Map"
         >
           <Crop className="w-3 h-3 text-sky-400 shrink-0" />
-          <span className="hidden 2xl:inline">Heightmap / Sub-Map</span>
-          <span className="2xl:hidden hidden sm:inline">Sub-Map</span>
+          <span className="hidden sm:inline">Sub-Map</span>
         </button>
 
         <button
           onClick={onOpenEconomyModal}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
+          title="จัดการสินค้า อาณาจักร ศาสนา และวัฒนธรรม"
         >
           <Package className="w-3 h-3 text-amber-400 shrink-0" />
-          <span className="hidden 2xl:inline">สินค้า · รัฐ · ศาสนา · วัฒนธรรม</span>
-          <span className="2xl:hidden hidden sm:inline">รัฐ/เศรษฐกิจ</span>
+          <span className="hidden sm:inline">รัฐ/เศรษฐกิจ</span>
         </button>
 
         <button
