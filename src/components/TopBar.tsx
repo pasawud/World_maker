@@ -10,6 +10,7 @@ import {
   FolderOpen,
   HelpCircle,
   Landmark,
+  Layers,
   Map as MapIcon,
   MapPin,
   Mountain,
@@ -64,6 +65,7 @@ const TOOL_GROUPS: {
     { id: 'current', label: 'กระแสน้ำ', icon: <Wind className="w-3.5 h-3.5" />, shortcut: 'C' },
     { id: 'wind', label: 'ทิศทางลม', icon: <Compass className="w-3.5 h-3.5" />, shortcut: '' },
     { id: 'climate', label: 'ภูมิอากาศ', icon: <CloudSun className="w-3.5 h-3.5" />, shortcut: '' },
+    { id: 'tectonic', label: 'แผ่นเปลือกโลก', icon: <Layers className="w-3.5 h-3.5" />, shortcut: 'T' },
   ],
   [
     { id: 'city', label: 'วางเมือง', icon: <Building2 className="w-3.5 h-3.5" />, shortcut: '4' },

@@ -4,9 +4,11 @@ import {
   ArrowUp,
   Droplets,
   Eraser,
+  Layers,
   Maximize2,
   Minus,
   Mountain,
+  MousePointer2,
   PaintBucket,
   Paintbrush,
   Pipette,
@@ -14,6 +16,7 @@ import {
   Route,
   Sparkles,
   Swords,
+  Trash2,
   Waves,
   Wind,
 } from 'lucide-react';
@@ -27,6 +30,10 @@ import {
   getCurrentCompassLabel,
   getCurrentKind,
 } from '../engine/currents';
+import {
+  computeTectonicField,
+  createCustomPlatesFromCurrent,
+} from '../engine/tectonics';
 import {
   computeWindField,
   getWindBeltLabelTh,
@@ -55,6 +62,7 @@ import {
 } from '../engine/worldGenerator';
 import {
   ClimateOverlay,
+  CustomTectonicPlate,
   HexCoord,
   HexMapData,
   LabelSize,
@@ -175,6 +183,19 @@ interface MapCanvasProps {
   tectonicEditPlateId?: string | null;
   onCancelTectonicPlace?: () => void;
   onClickTectonicPlateAt?: (q: number, r: number) => void;
+  tectonicSubTool?: 'edit' | 'add' | 'erase';
+  onChangeTectonicSubTool?: (m: 'edit' | 'add' | 'erase') => void;
+  tectonicAddOceanic?: boolean;
+  onChangeTectonicAddOceanic?: (v: boolean) => void;
+  selectedTectonicPlateId?: string | null;
+  onSelectTectonicPlate?: (id: string | null) => void;
+  onAddTectonicPlateAt?: (q: number, r: number, isOceanic: boolean) => void;
+  onDeleteTectonicPlate?: (id: string) => void;
+  onBeginTectonicDrag?: () => void;
+  onLiveUpdateTectonicPlates?: (
+    updater: (plates: CustomTectonicPlate[]) => CustomTectonicPlate[]
+  ) => void;
+  onEndTectonicDrag?: () => void;
   onNotify: (msg: string) => void;
 }
 
@@ -284,6 +305,17 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     tectonicEditPlateId = null,
     onCancelTectonicPlace,
     onClickTectonicPlateAt,
+    tectonicSubTool = 'edit',
+    onChangeTectonicSubTool,
+    tectonicAddOceanic = false,
+    onChangeTectonicAddOceanic,
+    selectedTectonicPlateId = null,
+    onSelectTectonicPlate,
+    onAddTectonicPlateAt,
+    onDeleteTectonicPlate,
+    onBeginTectonicDrag,
+    onLiveUpdateTectonicPlates,
+    onEndTectonicDrag,
     onNotify,
   } = props;
 
@@ -307,6 +339,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const isPanningRef = useRef(false);
   const panStartRef = useRef({ mx: 0, my: 0, cx: 0, cy: 0 });
   const isPaintingRef = useRef(false);
+  const tectonicDragRef = useRef<{ kind: 'center' | 'arrow'; plateId: string } | null>(null);
   const draftPathRef = useRef<HexCoord[]>([]);
   const [draftPath, setDraftPath] = useState<HexCoord[]>([]);
   const submapStartRef = useRef<HexCoord | null>(null);
@@ -459,7 +492,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       refOpacity: referenceOverlay?.visible ? referenceOverlay.opacity : 0,
       activeSeason,
       submapDraftBox,
-      selectedTectonicPlateId: tectonicEditPlateId,
+      selectedTectonicPlateId: tectonicEditPlateId ?? selectedTectonicPlateId,
     });
     ctx.restore();
   }, [
@@ -477,6 +510,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     referenceOverlay,
     renderVersion,
     selectedCityId,
+    selectedTectonicPlateId,
     submapDraftBox,
     tectonicEditPlateId,
     tool,
@@ -508,6 +542,24 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         activeSeason
       ),
     [activeSeason, map.elevation, map.geography, map.height, map.manualWinds, map.width]
+  );
+
+  const tectonicField = useMemo(
+    () =>
+      computeTectonicField(
+        map.width,
+        map.height,
+        map.geography.seed,
+        map.geography.tectonicPlates ?? 8,
+        map.customTectonicPlates
+      ),
+    [
+      map.customTectonicPlates,
+      map.geography.seed,
+      map.geography.tectonicPlates,
+      map.height,
+      map.width,
+    ]
   );
 
   // Minimap
@@ -552,7 +604,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           else if (tId === TerrainId.HIGH_PEAK) color = '#b8c4cf';
           if (map.features?.[idx] === 'cliff') color = '#574e46';
         }
-        if (climateOverlay === 'political' && map.territories?.[idx]) {
+        if (climateOverlay === 'tectonics') {
+          color = tectonicField.plates[tectonicField.plateIds[idx]]?.color ?? color;
+        } else if (climateOverlay === 'political' && map.territories?.[idx]) {
           color = map.kingdoms.find((k) => k.id === map.territories[idx])?.color ?? color;
         } else if (climateOverlay === 'religion' && map.religions?.[idx]) {
           color = map.religionList.find((rl) => rl.id === map.religions[idx])?.color ?? color;
@@ -583,19 +637,29 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     ctx.strokeRect(vx, vy, vw, vh);
   }, [cam, climateOverlay, map, mapWorldH, mapWorldW, renderVersion, showMinimap, viewSize]);
 
-  const screenToHex = useCallback(
-    (clientX: number, clientY: number): HexCoord | null => {
+  const screenToWorld = useCallback(
+    (clientX: number, clientY: number): { wx: number; wy: number } | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
       const sx = clientX - rect.left;
       const sy = clientY - rect.top;
-      const wx = (sx - viewSize.w / 2) / cam.zoom + cam.x;
-      const wy = (sy - viewSize.h / 2) / cam.zoom + cam.y;
-      const h = pixelToHex(wx, wy, BASE_HEX_RADIUS);
+      return {
+        wx: (sx - viewSize.w / 2) / cam.zoom + cam.x,
+        wy: (sy - viewSize.h / 2) / cam.zoom + cam.y,
+      };
+    },
+    [cam, viewSize]
+  );
+
+  const screenToHex = useCallback(
+    (clientX: number, clientY: number): HexCoord | null => {
+      const wpt = screenToWorld(clientX, clientY);
+      if (!wpt) return null;
+      const h = pixelToHex(wpt.wx, wpt.wy, BASE_HEX_RADIUS);
       return inBounds(h.q, h.r, map.width, map.height) ? h : null;
     },
-    [cam, map.height, map.width, viewSize]
+    [map.height, map.width, screenToWorld]
   );
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -618,6 +682,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
 
   const handlePointerDown = (e: React.PointerEvent) => {
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (e.button === 0 && !spacePressed && tectonicEditPlateId) {
+      const hPlace = screenToHex(e.clientX, e.clientY);
+      if (hPlace) onClickTectonicPlateAt?.(hPlace.q, hPlace.r);
+      return;
+    }
+
     const shouldPan = e.button === 1 || e.button === 2 || tool === 'view' || spacePressed;
     if (shouldPan) {
       isPanningRef.current = true;
@@ -628,8 +698,57 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const h = screenToHex(e.clientX, e.clientY);
     if (!h) return;
 
-    if (tectonicEditPlateId) {
-      onClickTectonicPlateAt?.(h.q, h.r);
+    if (tool === 'tectonic') {
+      const wpt = screenToWorld(e.clientX, e.clientY);
+      const editablePlates =
+        map.customTectonicPlates && map.customTectonicPlates.length >= 2
+          ? map.customTectonicPlates
+          : createCustomPlatesFromCurrent(map);
+
+      if (tectonicSubTool === 'add') {
+        onAddTectonicPlateAt?.(h.q, h.r, tectonicAddOceanic);
+        return;
+      }
+
+      if (tectonicSubTool === 'erase') {
+        if (editablePlates.length <= 2) {
+          warnOnce('ต้องมีแผ่นเปลือกโลกอย่างน้อย 2 แผ่น');
+          return;
+        }
+        const pIdx = tectonicField.plateIds[hexIndex(h.q, h.r, map.width)];
+        const hitId = editablePlates[pIdx]?.id;
+        if (hitId) onDeleteTectonicPlate?.(hitId);
+        return;
+      }
+
+      if (wpt) {
+        const hitR = Math.max(14, 20 / Math.max(0.25, cam.zoom));
+        for (const pl of editablePlates) {
+          const pc = hexToPixel(pl.centerQ, pl.centerR, BASE_HEX_RADIUS);
+          const spd = Math.hypot(pl.vx, pl.vy);
+          const hx = spd >= 0.08 ? pc.x + pl.vx * 34 : pc.x + 18;
+          const hy = spd >= 0.08 ? pc.y + pl.vy * 34 : pc.y;
+          if (Math.hypot(wpt.wx - hx, wpt.wy - hy) <= hitR) {
+            tectonicDragRef.current = { kind: 'arrow', plateId: pl.id };
+            onSelectTectonicPlate?.(pl.id);
+            onBeginTectonicDrag?.();
+            return;
+          }
+        }
+        for (const pl of editablePlates) {
+          const pc = hexToPixel(pl.centerQ, pl.centerR, BASE_HEX_RADIUS);
+          if (Math.hypot(wpt.wx - pc.x, wpt.wy - pc.y) <= hitR) {
+            tectonicDragRef.current = { kind: 'center', plateId: pl.id };
+            onSelectTectonicPlate?.(pl.id);
+            onBeginTectonicDrag?.();
+            return;
+          }
+        }
+      }
+
+      const pIdx = tectonicField.plateIds[hexIndex(h.q, h.r, map.width)];
+      const clickedId = editablePlates[pIdx]?.id ?? null;
+      onSelectTectonicPlate?.(clickedId);
       return;
     }
 
@@ -815,6 +934,42 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
 
     const h = screenToHex(e.clientX, e.clientY);
     setHoverHex(h);
+
+    if (tectonicDragRef.current) {
+      const drag = tectonicDragRef.current;
+      const wpt = screenToWorld(e.clientX, e.clientY);
+      if (drag.kind === 'center' && h) {
+        onLiveUpdateTectonicPlates?.((pls) =>
+          pls.map((pl) =>
+            pl.id === drag.plateId ? { ...pl, centerQ: h.q, centerR: h.r } : pl
+          )
+        );
+      } else if (drag.kind === 'arrow' && wpt) {
+        onLiveUpdateTectonicPlates?.((pls) =>
+          pls.map((pl) => {
+            if (pl.id !== drag.plateId) return pl;
+            const pc = hexToPixel(pl.centerQ, pl.centerR, BASE_HEX_RADIUS);
+            let vx = (wpt.wx - pc.x) / 34;
+            let vy = (wpt.wy - pc.y) / 34;
+            const len = Math.hypot(vx, vy);
+            if (len < 0.12) {
+              vx = 0;
+              vy = 0;
+            } else if (len > 1.3) {
+              vx = (vx / len) * 1.3;
+              vy = (vy / len) * 1.3;
+            }
+            return {
+              ...pl,
+              vx: Number(vx.toFixed(2)),
+              vy: Number(vy.toFixed(2)),
+            };
+          })
+        );
+      }
+      return;
+    }
+
     if (!h || !isPaintingRef.current) return;
 
     if (tool === 'terrain') {
@@ -900,6 +1055,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
   const handlePointerUp = () => {
     if (isPanningRef.current) {
       isPanningRef.current = false;
+    }
+    if (tectonicDragRef.current) {
+      tectonicDragRef.current = null;
+      onEndTectonicDrag?.();
     }
     if (isPaintingRef.current) {
       isPaintingRef.current = false;
@@ -1698,6 +1857,81 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
             <span className="text-amber-200">
               คลิกลากกรอบสี่เหลี่ยมบนแผนที่เพื่อเลือกโซนเจาะแผนที่ภูมิภาค (Sub-Map)
             </span>
+          )}
+
+          {tool === 'tectonic' && (
+            <>
+              <button
+                onClick={() => onChangeTectonicSubTool?.('edit')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  tectonicSubTool === 'edit'
+                    ? 'bg-amber-500/25 text-amber-200 font-medium'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <MousePointer2 className="w-3.5 h-3.5" /> ลากปรับ / หมุนทิศ
+              </button>
+              <button
+                onClick={() => onChangeTectonicSubTool?.('add')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  tectonicSubTool === 'add'
+                    ? 'bg-emerald-500/25 text-emerald-200 font-medium'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" /> วางแผ่นใหม่
+              </button>
+              <button
+                onClick={() => onChangeTectonicSubTool?.('erase')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  tectonicSubTool === 'erase'
+                    ? 'bg-rose-500/25 text-rose-200 font-medium'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Trash2 className="w-3.5 h-3.5" /> ลบแผ่น
+              </button>
+              {tectonicSubTool === 'add' && (
+                <>
+                  <div className="h-4 w-px bg-slate-700" />
+                  <button
+                    onClick={() => onChangeTectonicAddOceanic?.(false)}
+                    className={`px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+                      !tectonicAddOceanic
+                        ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                        : 'border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    🏔️ ทวีป
+                  </button>
+                  <button
+                    onClick={() => onChangeTectonicAddOceanic?.(true)}
+                    className={`px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+                      tectonicAddOceanic
+                        ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
+                        : 'border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    🌊 สมุทร
+                  </button>
+                </>
+              )}
+              <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+              <span className="hidden sm:inline-flex items-center gap-2 text-[11px] text-slate-300">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" /> ชนกัน
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-sky-400" /> แยกตัว
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-yellow-400" /> เฉือนกัน
+                </span>
+              </span>
+              <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-slate-400">
+                <Layers className="w-3 h-3 text-rose-400" /> ลากจุดกลมหรือหัวลูกศรได้โดยตรง
+              </span>
+            </>
           )}
         </div>
       )}

@@ -726,7 +726,8 @@ export type ToolMode =
   | 'trade'
   | 'measure'
   | 'poi'
-  | 'climate';
+  | 'climate'
+  | 'tectonic';
 
 export type ClimateOverlay =
   | 'none'

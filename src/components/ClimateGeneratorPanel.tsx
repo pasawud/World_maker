@@ -49,6 +49,7 @@ interface ClimateGeneratorPanelProps {
   onApplyTectonicsToCurrent?: (strength?: number) => void;
   onAutoPlaceFeatures?: () => void;
   onOpenSimulateModal?: () => void;
+  onOpenTectonicTool?: () => void;
 }
 
 export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
@@ -68,6 +69,7 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
   onApplyTectonicsToCurrent,
   onAutoPlaceFeatures,
   onOpenSimulateModal,
+  onOpenTectonicTool,
 }) => {
   const [draft, setDraft] = useState<GeographyConfig>(() => ({
     ...config,
@@ -524,6 +526,16 @@ export const ClimateGeneratorPanel: React.FC<ClimateGeneratorPanelProps> = ({
         {/* Custom Tectonic Plates Designer */}
         {onInitCustomPlates && onUpdateCustomPlates && (
           <div className="bg-[#0e151f] border border-slate-800 rounded-lg p-2.5 space-y-2">
+            {onOpenTectonicTool && (
+              <button
+                type="button"
+                onClick={onOpenTectonicTool}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/50 text-rose-100 text-[11px] font-medium cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5 text-rose-300" />
+                เปิดสตูดิโอแปรสัณฐาน (ลากปรับบนแผนที่ + เทมเพลต)
+              </button>
+            )}
             <div className="flex items-center justify-between gap-1">
               <span className="text-[11px] font-semibold text-amber-300 flex items-center gap-1">
                 <Layers className="w-3 h-3" />

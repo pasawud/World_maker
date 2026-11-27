@@ -37,6 +37,8 @@ import {
 import {
   applyTectonicsToCurrentMap,
   createCustomPlatesFromCurrent,
+  createTectonicPreset,
+  TectonicPresetId,
 } from '../engine/tectonics';
 import {
   autoPlaceSpecialFeatures,
@@ -49,6 +51,7 @@ import {
   autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
+  generateWorldFromTectonicPlates,
   recomputeBiomesFromCurrentMap,
 } from '../engine/worldGenerator';
 import { upsertDiplomaticRelation } from '../engine/worldbuilding';
@@ -150,6 +153,9 @@ export function useMapEditor() {
   const [activeSeason, setActiveSeason] = useState<SeasonId | null>(null);
   const [pendingSubMapBounds, setPendingSubMapBounds] = useState<SubMapBounds | null>(null);
   const [tectonicEditPlateId, setTectonicEditPlateId] = useState<string | null>(null);
+  const [tectonicSubTool, setTectonicSubTool] = useState<'edit' | 'add' | 'erase'>('edit');
+  const [tectonicAddOceanic, setTectonicAddOceanic] = useState<boolean>(false);
+  const [selectedTectonicPlateId, setSelectedTectonicPlateId] = useState<string | null>(null);
 
   const [activeKingdomId, setActiveKingdomId] = useState<string>(
     () => map.kingdoms[0]?.id ?? 'north'
@@ -2138,23 +2144,140 @@ export function useMapEditor() {
     [commitMapChange]
   );
 
+  const tectonicDragSnapshotRef = useRef<HexMapData | null>(null);
+  const tectonicDragMovedRef = useRef(false);
+
+  const beginTectonicDrag = useCallback(() => {
+    tectonicDragSnapshotRef.current = map;
+    tectonicDragMovedRef.current = false;
+  }, [map]);
+
+  const liveUpdateCustomTectonicPlates = useCallback(
+    (updater: (plates: CustomTectonicPlate[]) => CustomTectonicPlate[]) => {
+      tectonicDragMovedRef.current = true;
+      setMap((prev) => {
+        const current = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+        return {
+          ...prev,
+          customTectonicPlates: updater(current),
+        };
+      });
+      markAllDirty();
+    },
+    [markAllDirty]
+  );
+
+  const endTectonicDrag = useCallback(() => {
+    const snap = tectonicDragSnapshotRef.current;
+    tectonicDragSnapshotRef.current = null;
+    const moved = tectonicDragMovedRef.current;
+    tectonicDragMovedRef.current = false;
+    if (snap && moved) {
+      setUndoStack((u) => [...u.slice(-(MAX_HISTORY - 1)), snap]);
+      setRedoStack([]);
+    }
+  }, []);
+
   const updateCustomTectonicPlates = useCallback(
     (plates: CustomTectonicPlate[] | undefined) => {
       commitMapChange((prev) => ({
         ...prev,
         customTectonicPlates: plates,
       }));
+      if (!plates) setSelectedTectonicPlateId(null);
     },
     [commitMapChange]
   );
 
   const initCustomTectonicPlates = useCallback(() => {
-    commitMapChange((prev) => ({
-      ...prev,
-      customTectonicPlates: createCustomPlatesFromCurrent(prev),
-    }));
+    let firstId: string | null = null;
+    commitMapChange((prev) => {
+      const plates = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+      firstId = plates[0]?.id ?? null;
+      return {
+        ...prev,
+        customTectonicPlates: plates,
+      };
+    });
+    if (firstId) setSelectedTectonicPlateId(firstId);
+    setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
     setClimateOverlay('tectonics');
   }, [commitMapChange]);
+
+  const applyTectonicPreset = useCallback(
+    (preset: TectonicPresetId, plateCount = 6) => {
+      let firstId: string | null = null;
+      commitMapChange((prev) => {
+        const nextPlates = createTectonicPreset(preset, prev, plateCount);
+        firstId = nextPlates[0]?.id ?? null;
+        return {
+          ...prev,
+          customTectonicPlates: nextPlates,
+          geography: {
+            ...prev.geography,
+            tectonicPlates: nextPlates.length,
+          },
+        };
+      });
+      setSelectedTectonicPlateId(firstId);
+      setTectonicEditPlateId(null);
+      setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
+    },
+    [commitMapChange]
+  );
+
+  const addTectonicPlateAt = useCallback(
+    (q: number, r: number, isOceanic: boolean) => {
+      let createdId = '';
+      commitMapChange((prev) => {
+        const current = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+        const palette = [
+          '#f59e0b',
+          '#38bdf8',
+          '#a78bfa',
+          '#34d399',
+          '#fb7185',
+          '#facc15',
+          '#60a5fa',
+          '#2dd4bf',
+        ];
+        const num = current.length + 1;
+        createdId = `plate_${Date.now().toString(36)}_${num}`;
+        const nextPlate: CustomTectonicPlate = {
+          id: createdId,
+          name: `${isOceanic ? 'แผ่นสมุทร' : 'แผ่นทวีป'} #${num}`,
+          color: palette[(num - 1) % palette.length],
+          centerQ: Math.max(0, Math.min(prev.width - 1, q)),
+          centerR: Math.max(0, Math.min(prev.height - 1, r)),
+          vx: isOceanic ? -0.65 : 0.65,
+          vy: 0.1,
+          isOceanic,
+        };
+        return {
+          ...prev,
+          customTectonicPlates: [...current, nextPlate],
+        };
+      });
+      if (createdId) setSelectedTectonicPlateId(createdId);
+      setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
+    },
+    [commitMapChange]
+  );
+
+  const deleteTectonicPlateById = useCallback(
+    (plateId: string) => {
+      commitMapChange((prev) => {
+        const current = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+        if (current.length <= 2) return prev;
+        return {
+          ...prev,
+          customTectonicPlates: current.filter((p) => p.id !== plateId),
+        };
+      });
+      setSelectedTectonicPlateId((cur) => (cur === plateId ? null : cur));
+    },
+    [commitMapChange]
+  );
 
   const placeOrMoveTectonicPlateAt = useCallback(
     (q: number, r: number) => {
@@ -2211,6 +2334,25 @@ export function useMapEditor() {
               : 0.65)
         )
       );
+    },
+    [commitMapChange]
+  );
+
+  const runGenerateWorldFromTectonics = useCallback(
+    (strength?: number) => {
+      commitMapChange((prev) =>
+        generateWorldFromTectonicPlates(
+          prev,
+          strength ??
+            (prev.geography.tectonicStrength && prev.geography.tectonicStrength > 0
+              ? prev.geography.tectonicStrength
+              : 0.85)
+        )
+      );
+      setSelectedCityId(null);
+      setTradeStartCityId(null);
+      setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
+      setClimateOverlay('none');
     },
     [commitMapChange]
   );
@@ -2442,10 +2584,23 @@ export function useMapEditor() {
     updateCalendar,
     tectonicEditPlateId,
     setTectonicEditPlateId,
+    tectonicSubTool,
+    setTectonicSubTool,
+    tectonicAddOceanic,
+    setTectonicAddOceanic,
+    selectedTectonicPlateId,
+    setSelectedTectonicPlateId,
+    beginTectonicDrag,
+    liveUpdateCustomTectonicPlates,
+    endTectonicDrag,
     updateCustomTectonicPlates,
     initCustomTectonicPlates,
+    applyTectonicPreset,
+    addTectonicPlateAt,
+    deleteTectonicPlateById,
     placeOrMoveTectonicPlateAt,
     runApplyTectonicsToCurrentMap,
+    runGenerateWorldFromTectonics,
     runAutoPlaceFeatures,
     runSimulateAllFromCurrentMap,
   };

@@ -125,6 +125,12 @@ export function App() {
         editor.setTool('current');
         return;
       }
+      if (e.key.toLowerCase() === 't') {
+        editor.setTool('tectonic');
+        if (!editor.layers.tectonics) editor.toggleLayer('tectonics');
+        if (editor.climateOverlay === 'none') editor.setClimateOverlay('tectonics');
+        return;
+      }
       if (e.key === 'Escape') {
         editor.setTradeStartCityId(null);
         editor.setMeasurePoints([]);
@@ -203,7 +209,13 @@ export function App() {
       <TopBar
         map={editor.map}
         tool={editor.tool}
-        onSelectTool={editor.setTool}
+        onSelectTool={(t) => {
+          editor.setTool(t);
+          if (t === 'tectonic') {
+            if (!editor.layers.tectonics) editor.toggleLayer('tectonics');
+            if (editor.climateOverlay === 'none') editor.setClimateOverlay('tectonics');
+          }
+        }}
         onRenameMap={(name) =>
           editor.commitMapChange((prev) => ({ ...prev, name }), [])
         }
@@ -381,6 +393,23 @@ export function App() {
             if (editor.climateOverlay !== 'tectonics') editor.setClimateOverlay('tectonics');
             showToast(`กำหนดตำแหน่งแผ่นเปลือกโลกที่ (${q}, ${r}) แล้ว`);
           }}
+          tectonicSubTool={editor.tectonicSubTool}
+          onChangeTectonicSubTool={editor.setTectonicSubTool}
+          tectonicAddOceanic={editor.tectonicAddOceanic}
+          onChangeTectonicAddOceanic={editor.setTectonicAddOceanic}
+          selectedTectonicPlateId={editor.selectedTectonicPlateId}
+          onSelectTectonicPlate={editor.setSelectedTectonicPlateId}
+          onAddTectonicPlateAt={(q, r, isOceanic) => {
+            editor.addTectonicPlateAt(q, r, isOceanic);
+            showToast(`วางแผ่น${isOceanic ? 'มหาสมุทร' : 'ทวีป'}ใหม่ที่ (${q}, ${r}) แล้ว`);
+          }}
+          onDeleteTectonicPlate={(id) => {
+            editor.deleteTectonicPlateById(id);
+            showToast('ลบแผ่นเปลือกโลกแล้ว');
+          }}
+          onBeginTectonicDrag={editor.beginTectonicDrag}
+          onLiveUpdateTectonicPlates={editor.liveUpdateCustomTectonicPlates}
+          onEndTectonicDrag={editor.endTectonicDrag}
           onSelectSubMapZone={(bounds) => {
             editor.setPendingSubMapBounds(bounds);
             setShowHeightmapModal(true);
@@ -598,6 +627,31 @@ export function App() {
           onApplyTectonicsToCurrent={(strength) => {
             editor.runApplyTectonicsToCurrentMap(strength);
             showToast('ปรับความสูง แนวภูเขา ร่องลึก และภูเขาไฟตามแผ่นเปลือกโลกแล้ว');
+          }}
+          showTectonicLayer={Boolean(editor.layers.tectonics)}
+          tectonicSubTool={editor.tectonicSubTool}
+          tectonicAddOceanic={editor.tectonicAddOceanic}
+          selectedTectonicPlateId={editor.selectedTectonicPlateId}
+          onToggleTectonicLayer={() => editor.toggleLayer('tectonics')}
+          onChangeTectonicSubTool={editor.setTectonicSubTool}
+          onChangeTectonicAddOceanic={editor.setTectonicAddOceanic}
+          onSelectTectonicPlate={editor.setSelectedTectonicPlateId}
+          onApplyTectonicPreset={(preset, count) => {
+            editor.applyTectonicPreset(preset, count);
+            showToast('ใช้เทมเพลตแผ่นเปลือกโลกสำเร็จรูปแล้ว');
+          }}
+          onDeleteTectonicPlate={(id) => {
+            editor.deleteTectonicPlateById(id);
+            showToast('ลบแผ่นเปลือกโลกแล้ว');
+          }}
+          onGenerateWorldFromPlates={(strength) => {
+            editor.runGenerateWorldFromTectonics(strength);
+            showToast('สร้างแผ่นดิน ทวีป เทือกเขา และโลกใหม่จากแผ่นเปลือกโลกแล้ว');
+          }}
+          onOpenTectonicTool={() => {
+            editor.setTool('tectonic');
+            if (!editor.layers.tectonics) editor.toggleLayer('tectonics');
+            if (editor.climateOverlay === 'none') editor.setClimateOverlay('tectonics');
           }}
           onOpenSimulateModal={() => setShowSimulateModal(true)}
           brushSize={editor.brushSize}

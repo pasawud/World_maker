@@ -44,6 +44,7 @@ import {
   computeReligionStats,
   computeTerritoryStats,
 } from '../engine/politics';
+import { TectonicPresetId } from '../engine/tectonics';
 import {
   City,
   ClimateOverlay,
@@ -67,6 +68,7 @@ import {
 } from '../types/map';
 import { CityInspector } from './CityInspector';
 import { ClimateGeneratorPanel } from './ClimateGeneratorPanel';
+import { TectonicPanel } from './TectonicPanel';
 
 interface RightSidebarProps {
   map: HexMapData;
@@ -102,6 +104,18 @@ interface RightSidebarProps {
   onUpdateCustomPlates: (plates: CustomTectonicPlate[] | undefined) => void;
   onStartPlacePlate: (plateId: string | null) => void;
   onApplyTectonicsToCurrent: (strength?: number) => void;
+  showTectonicLayer?: boolean;
+  tectonicSubTool?: 'edit' | 'add' | 'erase';
+  tectonicAddOceanic?: boolean;
+  selectedTectonicPlateId?: string | null;
+  onToggleTectonicLayer?: () => void;
+  onChangeTectonicSubTool?: (m: 'edit' | 'add' | 'erase') => void;
+  onChangeTectonicAddOceanic?: (v: boolean) => void;
+  onSelectTectonicPlate?: (id: string | null) => void;
+  onApplyTectonicPreset?: (preset: TectonicPresetId, count?: number) => void;
+  onDeleteTectonicPlate?: (id: string) => void;
+  onGenerateWorldFromPlates?: (strength: number) => void;
+  onOpenTectonicTool?: () => void;
   onOpenSimulateModal: () => void;
   brushSize: number;
   onChangeBrushSize: (n: number) => void;
@@ -194,6 +208,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onUpdateCustomPlates,
     onStartPlacePlate,
     onApplyTectonicsToCurrent,
+    showTectonicLayer = false,
+    tectonicSubTool = 'edit',
+    tectonicAddOceanic = false,
+    selectedTectonicPlateId = null,
+    onToggleTectonicLayer,
+    onChangeTectonicSubTool,
+    onChangeTectonicAddOceanic,
+    onSelectTectonicPlate,
+    onApplyTectonicPreset,
+    onDeleteTectonicPlate,
+    onGenerateWorldFromPlates,
+    onOpenTectonicTool,
     onOpenSimulateModal,
     brushSize,
     onChangeBrushSize,
@@ -1404,6 +1430,32 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           onApplyTectonicsToCurrent={onApplyTectonicsToCurrent}
           onAutoPlaceFeatures={onAutoPlaceFeatures}
           onOpenSimulateModal={onOpenSimulateModal}
+          onOpenTectonicTool={onOpenTectonicTool}
+        />
+      )}
+
+      {tool === 'tectonic' && (
+        <TectonicPanel
+          map={map}
+          overlay={climateOverlay}
+          showTectonicLayer={showTectonicLayer}
+          tectonicSubTool={tectonicSubTool}
+          tectonicAddOceanic={tectonicAddOceanic}
+          selectedPlateId={selectedTectonicPlateId}
+          tectonicEditPlateId={tectonicEditPlateId}
+          onChangeOverlay={onChangeOverlay}
+          onToggleTectonicLayer={() => onToggleTectonicLayer?.()}
+          onChangeSubTool={(m) => onChangeTectonicSubTool?.(m)}
+          onChangeAddOceanic={(v) => onChangeTectonicAddOceanic?.(v)}
+          onSelectPlate={(id) => onSelectTectonicPlate?.(id)}
+          onApplyPreset={(preset, count) => onApplyTectonicPreset?.(preset, count)}
+          onInitCustomPlates={onInitCustomPlates}
+          onUpdateCustomPlates={onUpdateCustomPlates}
+          onDeletePlate={(id) => onDeleteTectonicPlate?.(id)}
+          onStartPlacePlate={onStartPlacePlate}
+          onGenerateWorldFromPlates={(s) => onGenerateWorldFromPlates?.(s)}
+          onApplyTectonicsToCurrent={(s) => onApplyTectonicsToCurrent(s)}
+          onUpdateGeographyStrength={(s) => onUpdateGeography({ tectonicStrength: s })}
         />
       )}
 

@@ -5,6 +5,7 @@ import { isWaterTerrain, isWaterTerrainWithCustom } from '../data/terrains';
 import {
   BiomeId,
   City,
+  CustomTectonicPlate,
   GeographyConfig,
   HexMapData,
   ManualCurrentPath,
@@ -36,6 +37,7 @@ import {
   applyTectonicFeatures,
   applyTectonicsToElevation,
   computeTectonicField,
+  createCustomPlatesFromCurrent,
 } from './tectonics';
 
 export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
@@ -153,7 +155,8 @@ export function getPrevailingWindDir(latDeg: number, windMode: WindMode): 1 | -1
 export function generateElevationField(
   width: number,
   height: number,
-  config: GeographyConfig
+  config: GeographyConfig,
+  customTectonicPlates?: CustomTectonicPlate[]
 ): number[] {
   if (config.landmassType === 'real_earth') {
     return generateRealEarthElevationField(width, height, config);
@@ -240,7 +243,8 @@ export function generateElevationField(
       width,
       height,
       config.seed,
-      config.tectonicPlates ?? 8
+      config.tectonicPlates ?? 8,
+      customTectonicPlates
     );
     return applyTectonicsToElevation(
       elev,
@@ -713,9 +717,10 @@ export function generateWorld(
   height: number,
   hexSizeKm: number,
   config: GeographyConfig,
-  existingName = 'แผนที่โลกใหม่'
+  existingName = 'แผนที่โลกใหม่',
+  customTectonicPlates?: CustomTectonicPlate[]
 ): HexMapData {
-  const elevation = generateElevationField(width, height, config);
+  const elevation = generateElevationField(width, height, config, customTectonicPlates);
   const { temperature, moisture } = simulateClimate(elevation, width, height, config);
   const terrains = classifyTerrainsFromElevation(elevation, width, height, moisture);
   const initialBiomes = classifyBiomesFromClimate(
@@ -766,7 +771,13 @@ export function generateWorld(
           width,
           height,
           elevation,
-          computeTectonicField(width, height, config.seed, config.tectonicPlates ?? 8),
+          computeTectonicField(
+            width,
+            height,
+            config.seed,
+            config.tectonicPlates ?? 8,
+            customTectonicPlates
+          ),
           config.seed
         )
       : baseFeatures;
@@ -803,6 +814,9 @@ export function generateWorld(
     height,
     hexSizeKm,
     geography: { ...config },
+    ...(customTectonicPlates && customTectonicPlates.length >= 2
+      ? { customTectonicPlates }
+      : {}),
     terrains: waterSync.terrains,
     biomes: waterSync.biomes,
     elevation: waterSync.elevation,
@@ -1018,5 +1032,180 @@ export function recomputeBiomesFromCurrentMap(map: HexMapData): HexMapData {
     moisture,
     biomes: waterSync.biomes,
     features: waterSync.features,
+  };
+}
+
+/**
+ * Generate full continents, ocean basins, mountain ranges, climate, hydrology, and biomes
+ * directly from the map's tectonic plate definitions (continental vs oceanic + fault drift).
+ */
+export function generateWorldFromTectonicPlates(
+  map: HexMapData,
+  strength = 0.85
+): HexMapData {
+  const { width, height, geography } = map;
+  const effStrength = Math.max(0.2, Math.min(1.5, strength));
+  const plates =
+    map.customTectonicPlates && map.customTectonicPlates.length >= 2
+      ? map.customTectonicPlates
+      : createCustomPlatesFromCurrent(map);
+
+  const nextGeo: GeographyConfig = {
+    ...geography,
+    tectonicPlates: plates.length,
+    tectonicStrength: effStrength,
+  };
+  const field = computeTectonicField(width, height, nextGeo.seed, plates.length, plates);
+
+  const nBase = createNoise2D(nextGeo.seed + 211);
+  const nRidge = createNoise2D(nextGeo.seed + 577);
+  const total = width * height;
+  const aspect = width / Math.max(1, height);
+  const baseElev = new Array<number>(total);
+
+  for (let r = 0; r < height; r++) {
+    const ny = r / Math.max(1, height - 1);
+    const cy = ny * 2 - 1;
+    const edgeLatFade = Math.max(0, Math.abs(cy) - 0.86) * 1.4;
+    for (let q = 0; q < width; q++) {
+      const nx = q / Math.max(1, width - 1);
+      const cx = nx * 2 - 1;
+      const edgeLonFade = Math.max(0, Math.abs(cx) - 0.88) * 1.3;
+      const idx = hexIndex(q, r, width);
+      const plate = field.plates[field.plateIds[idx]];
+      const noiseVal = nBase.fbm(nx * 4.2 * aspect, ny * 4.2, 4);
+      const ridgeVal = nRidge.ridged(nx * 5.0 * aspect + 6.1, ny * 5.0 + 3.7, 3);
+
+      let e = plate?.isOceanic
+        ? -0.46 + noiseVal * 0.24 - nextGeo.seaLevel
+        : 0.22 + noiseVal * 0.28 + Math.max(0, ridgeVal - 0.45) * 0.22 * nextGeo.mountainScale - nextGeo.seaLevel;
+
+      e -= edgeLatFade + edgeLonFade;
+      baseElev[idx] = Math.max(-1, Math.min(1, e));
+    }
+  }
+
+  // Smooth continental margins gently before tectonic boundary uplift/subduction
+  let smoothed = baseElev;
+  for (let pass = 0; pass < 2; pass++) {
+    const nextBuf = new Array<number>(total);
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) {
+        const idx = hexIndex(q, r, width);
+        let acc = smoothed[idx] * 2.0;
+        let w = 2.0;
+        for (const nb of getNeighbors(q, r, width, height)) {
+          acc += smoothed[hexIndex(nb.q, nb.r, width)];
+          w += 1;
+        }
+        nextBuf[idx] = acc / w;
+      }
+    }
+    smoothed = nextBuf;
+  }
+
+  const elevation = applyTectonicsToElevation(smoothed, width, height, field, effStrength);
+  const { temperature, moisture } = simulateClimate(
+    elevation,
+    width,
+    height,
+    nextGeo,
+    undefined,
+    map.manualCurrents
+  );
+  const terrains = classifyTerrainsFromElevation(elevation, width, height, moisture);
+  const initialBiomes = classifyBiomesFromClimate(
+    elevation,
+    temperature,
+    moisture,
+    width,
+    height,
+    undefined,
+    terrains
+  );
+
+  const hydro = generateRiversAuto({
+    width,
+    height,
+    terrains,
+    biomes: initialBiomes,
+    elevation,
+    moisture,
+    geography: nextGeo,
+  });
+
+  const biomes = classifyBiomesFromClimate(
+    elevation,
+    temperature,
+    moisture,
+    width,
+    height,
+    hydro.riverMoistureBonus,
+    terrains
+  );
+
+  const baseFeatures = generateSpecialFeatures(
+    width,
+    height,
+    biomes,
+    elevation,
+    temperature,
+    moisture,
+    hydro.rivers,
+    nextGeo.seed,
+    terrains
+  );
+  const rawFeatures = applyTectonicFeatures(
+    baseFeatures,
+    width,
+    height,
+    elevation,
+    field,
+    nextGeo.seed
+  );
+
+  const cliffRes = generateNaturalCliffs(
+    width,
+    height,
+    biomes,
+    elevation,
+    rawFeatures,
+    hydro.rivers,
+    nextGeo.seed,
+    undefined,
+    terrains
+  );
+
+  const waterSync = syncShallowWater({
+    width,
+    height,
+    terrains,
+    biomes,
+    elevation: cliffRes.elevation,
+    features: cliffRes.features,
+    customBiomes: map.customBiomes,
+  });
+
+  return {
+    ...map,
+    updatedAt: new Date().toISOString(),
+    geography: nextGeo,
+    customTectonicPlates: plates,
+    terrains: waterSync.terrains,
+    biomes: waterSync.biomes,
+    elevation: waterSync.elevation,
+    temperature,
+    moisture,
+    features: waterSync.features,
+    rivers: hydro.rivers,
+    cities: [],
+    roads: [],
+    tradeRoutes: [],
+    pois: [],
+    labels: [],
+    campaigns: [],
+    territories: new Array<string>(total).fill(''),
+    religions: new Array<string>(total).fill(''),
+    cultures: new Array<string>(total).fill(''),
   };
 }

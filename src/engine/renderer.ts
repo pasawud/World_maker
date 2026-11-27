@@ -1770,7 +1770,7 @@ export class ChunkedMapRenderer {
     const activeSeason = options.activeSeason ?? null;
     const sizeKey = `${map.width}x${map.height}`;
     const customPlatesSig = (map.customTectonicPlates ?? [])
-      .map((p) => `${p.id}:${Math.round(p.centerQ)}:${Math.round(p.centerR)}:${p.vx.toFixed(2)}:${p.vy.toFixed(2)}:${p.color}`)
+      .map((p) => `${p.id}:${Math.round(p.centerQ)}:${Math.round(p.centerR)}:${p.vx.toFixed(2)}:${p.vy.toFixed(2)}:${p.color}:${p.isOceanic ? 1 : 0}`)
       .join('|');
     const customWindsSig = (map.manualWinds ?? [])
       .map((w) => `${w.id}:${w.kind}:${w.strength}:${w.points.length}`)
@@ -1868,7 +1868,7 @@ export class ChunkedMapRenderer {
         ? this.getWindData(map, activeSeason).streams
         : undefined;
     const tectonicField =
-      options.overlay === 'tectonics' || options.layers.tectonics
+      options.overlay === 'tectonics' || options.layers.tectonics || options.tool === 'tectonic'
         ? this.getTectonicData(map)
         : undefined;
     drawDynamicLayers(ctx, map, cam.zoom, {
@@ -2576,9 +2576,14 @@ function drawDynamicLayers(
   }
 
   // 9b. Tectonic Plate Drift Arrows, Centers & Labels
-  if (options.tectonicField && (options.overlay === 'tectonics' || layers.tectonics)) {
+  if (
+    options.tectonicField &&
+    (options.overlay === 'tectonics' || layers.tectonics || options.tool === 'tectonic')
+  ) {
+    const isTectonicStudio = options.tool === 'tectonic';
     for (const plate of options.tectonicField.plates) {
       const p = hexToPixel(plate.centerQ, plate.centerR, BASE_HEX_RADIUS);
+      const speed = Math.hypot(plate.vx, plate.vy);
       const ax = p.x + plate.vx * 34;
       const ay = p.y + plate.vy * 34;
       const ang = Math.atan2(plate.vy, plate.vx);
@@ -2589,39 +2594,72 @@ function drawDynamicLayers(
 
       // Center anchor marker (dashed cyan halo for oceanic, gold halo when selected)
       ctx.beginPath();
-      ctx.arc(p.x, p.y, isSelected ? 10 : 7, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(10, 16, 26, 0.72)';
+      ctx.arc(p.x, p.y, isSelected ? 11 : isTectonicStudio ? 8.5 : 7, 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? 'rgba(245, 158, 11, 0.25)' : 'rgba(10, 16, 26, 0.78)';
       ctx.fill();
-      ctx.lineWidth = isSelected ? 2.5 : 1.6;
+      ctx.lineWidth = isSelected ? 2.5 : 1.7;
       ctx.strokeStyle = isSelected ? '#fbbf24' : plate.isOceanic ? '#22d3ee' : plate.color;
       if (plate.isOceanic) ctx.setLineDash([3, 2]);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.strokeStyle = plate.color;
-      ctx.fillStyle = plate.color;
-      ctx.lineWidth = Math.max(2.2, 2.8 / Math.max(0.5, zoom));
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(ax, ay);
-      ctx.stroke();
+      if (isTectonicStudio) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = isSelected ? '#fef08a' : '#f8fafc';
+        ctx.fill();
+      }
 
-      const head = 8;
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(ax - Math.cos(ang - 0.5) * head, ay - Math.sin(ang - 0.5) * head);
-      ctx.lineTo(ax - Math.cos(ang + 0.5) * head, ay - Math.sin(ang + 0.5) * head);
-      ctx.closePath();
-      ctx.fill();
+      if (speed >= 0.08) {
+        ctx.strokeStyle = isSelected ? '#fbbf24' : plate.color;
+        ctx.fillStyle = isSelected ? '#fbbf24' : plate.color;
+        ctx.lineWidth = Math.max(2.2, 2.8 / Math.max(0.5, zoom));
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(ax, ay);
+        ctx.stroke();
 
-      if (zoom >= 0.35) {
+        const head = 8;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - Math.cos(ang - 0.5) * head, ay - Math.sin(ang - 0.5) * head);
+        ctx.lineTo(ax - Math.cos(ang + 0.5) * head, ay - Math.sin(ang + 0.5) * head);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      if (isTectonicStudio) {
+        const hx = speed >= 0.08 ? ax : p.x + 18;
+        const hy = speed >= 0.08 ? ay : p.y;
+        if (speed < 0.08) {
+          ctx.save();
+          ctx.setLineDash([2, 2]);
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(hx, hy);
+          ctx.stroke();
+          ctx.restore();
+        }
+        ctx.beginPath();
+        ctx.arc(hx, hy, isSelected ? 5.5 : 4.2, 0, Math.PI * 2);
+        ctx.fillStyle = isSelected ? '#fbbf24' : '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = '#0f172a';
+        ctx.stroke();
+      }
+
+      if (zoom >= 0.35 || isTectonicStudio) {
         const prefix = plate.isOceanic ? '🌊 ' : '🏔️ ';
-        ctx.font = '600 11px Sarabun, sans-serif';
+        ctx.font = `${isSelected ? '700' : '600'} 11px Sarabun, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.shadowColor = 'rgba(0,0,0,0.9)';
         ctx.shadowBlur = 4;
-        ctx.fillText(`${prefix}${plate.name}`, p.x, p.y - 11);
+        ctx.fillStyle = isSelected ? '#fde68a' : plate.color;
+        ctx.fillText(`${prefix}${plate.name}`, p.x, p.y - 12);
       }
       ctx.restore();
     }
@@ -3283,6 +3321,10 @@ export function exportMapToPng(
         ? 'ความสูง & ความลึก (ม.)'
         : options.overlay === 'currents'
         ? 'กระแสน้ำมหาสมุทร (Currents)'
+        : options.overlay === 'winds'
+        ? 'ทิศทางลม & เดินเรือ (Wind Belts)'
+        : options.overlay === 'tectonics'
+        ? 'แผ่นเปลือกโลก & รอยเลื่อน (Tectonics)'
         : options.overlay === 'terrain'
         ? 'ภูมิประเทศ (Terrain)'
         : options.overlay === 'biome'
@@ -3329,6 +3371,49 @@ export function exportMapToPng(
         ctx.font = '400 12px Sarabun, sans-serif';
         ctx.fillText(item.label, lx + 22, ly + 1);
         ly += 22;
+      }
+    } else if (options.overlay === 'tectonics' && exportTectonics) {
+      const faults = [
+        { color: '#f43f5e', label: 'ขอบชนกัน (เทือกเขา/ร่องลึก)' },
+        { color: '#38bdf8', label: 'ขอบแยกตัว (หุบเขาทรุด/สันสมุทร)' },
+        { color: '#facc15', label: 'ขอบเฉือนกัน (รอยเลื่อน)' },
+      ];
+      for (const item of faults) {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(lx, ly - 10, 14, 14);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeRect(lx, ly - 10, 14, 14);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '400 11px Sarabun, sans-serif';
+        ctx.fillText(item.label, lx + 22, ly + 1);
+        ly += 20;
+      }
+      ly += 6;
+      for (const p of exportTectonics.plates.slice(0, 10)) {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(lx, ly - 10, 14, 14);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '400 11px Sarabun, sans-serif';
+        ctx.fillText(`${p.isOceanic ? '🌊' : '🏔️'} ${p.name}`, lx + 22, ly + 1);
+        ly += 20;
+      }
+    } else if (options.overlay === 'winds') {
+      const items = [
+        { color: '#22d3ee', label: 'ลมค้า (Trade Winds)' },
+        { color: '#38bdf8', label: 'ลมตะวันตก (Westerlies)' },
+        { color: '#bae6fd', label: 'ลมขั้วโลก (Polar Easterlies)' },
+        { color: '#f59e0b', label: 'ลมมรสุม / พายุ (Monsoon/Gale)' },
+        { color: '#64748b', label: 'เขตลมสงบ (Doldrums/Calm)' },
+      ];
+      for (const item of items) {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(lx, ly - 10, 14, 14);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeRect(lx, ly - 10, 14, 14);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '400 11px Sarabun, sans-serif';
+        ctx.fillText(item.label, lx + 22, ly + 1);
+        ly += 20;
       }
     } else if (options.overlay === 'political') {
       for (const k of map.kingdoms) {

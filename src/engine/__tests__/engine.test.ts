@@ -31,6 +31,9 @@ import {
   applyTectonicsToCurrentMap,
   applyTectonicsToElevation,
   computeTectonicField,
+  computeTectonicSummary,
+  createTectonicPreset,
+  TectonicPresetId,
 } from '../tectonics';
 import {
   autoPlaceSpecialFeatures,
@@ -97,6 +100,7 @@ import {
   autoSuggestGoodsForCity,
   DEFAULT_GEOGRAPHY_CONFIG,
   generateWorld,
+  generateWorldFromTectonicPlates,
   getColLongitude,
   getPrevailingWindVector,
   getRowLatitude,
@@ -2019,5 +2023,76 @@ describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () =>
     const resized = resizeMap(restored, 96, 72, 12, 'preserve');
     expect(resized.childSubMaps?.[0].bounds.minQ).toBe(12);
     expect(resized.manualWinds?.length).toBe(2);
+  });
+
+  it('creates 1-click tectonic presets, computes fault summaries, preserves custom plates in generateWorld, and builds full worlds from plates', () => {
+    const base = generateWorld(56, 38, 25, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 8088,
+      landmassType: 'continent',
+    });
+
+    const presetIds: TectonicPresetId[] = [
+      'supercontinent',
+      'atlantic_rift',
+      'ring_of_fire',
+      'archipelago',
+      'balanced_random',
+      'from_current_map',
+    ];
+    for (const pid of presetIds) {
+      const plates = createTectonicPreset(pid, base, 7, 1234);
+      expect(plates.length).toBeGreaterThanOrEqual(4);
+      for (const p of plates) {
+        expect(p.centerQ).toBeGreaterThanOrEqual(0);
+        expect(p.centerQ).toBeLessThan(base.width);
+        expect(p.centerR).toBeGreaterThanOrEqual(0);
+        expect(p.centerR).toBeLessThan(base.height);
+      }
+    }
+
+    const scPlates = createTectonicPreset('supercontinent', base);
+    const scField = computeTectonicField(base.width, base.height, base.geography.seed, scPlates.length, scPlates);
+    const scSummary = computeTectonicSummary(scField);
+    expect(scSummary.convergent).toBeGreaterThan(0);
+    expect(scSummary.continentalPlates).toBe(2);
+    expect(scSummary.oceanicPlates).toBe(4);
+
+    const generated = generateWorldFromTectonicPlates(
+      { ...base, customTectonicPlates: scPlates },
+      0.9
+    );
+    expect(generated.width).toBe(base.width);
+    expect(generated.height).toBe(base.height);
+    expect(generated.customTectonicPlates?.length).toBe(scPlates.length);
+    expect(generated.elevation).toHaveLength(base.width * base.height);
+    expect(generated.terrains?.length).toBe(base.width * base.height);
+
+    // Continental plates should average noticeably higher elevation than oceanic plates
+    let landSum = 0;
+    let landCnt = 0;
+    let seaSum = 0;
+    let seaCnt = 0;
+    for (let i = 0; i < scField.plateIds.length; i++) {
+      const pl = scField.plates[scField.plateIds[i]];
+      if (pl?.isOceanic) {
+        seaSum += generated.elevation[i];
+        seaCnt++;
+      } else {
+        landSum += generated.elevation[i];
+        landCnt++;
+      }
+    }
+    expect(landSum / Math.max(1, landCnt)).toBeGreaterThan(seaSum / Math.max(1, seaCnt) + 0.35);
+
+    const directWithCustom = generateWorld(
+      40,
+      30,
+      20,
+      { ...DEFAULT_GEOGRAPHY_CONFIG, tectonicStrength: 0.75 },
+      'Custom Plate World',
+      scPlates
+    );
+    expect(directWithCustom.customTectonicPlates?.length).toBe(scPlates.length);
   });
 });
