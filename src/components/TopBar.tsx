@@ -108,7 +108,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <header className="h-11 bg-[#111720] border-b border-slate-800/90 px-2.5 flex items-center justify-between gap-2 select-none shrink-0 z-20">
       {/* Left: Library + Map Name + Dimensions */}
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         <button
           onClick={onOpenLibrary}
           className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#18212d] hover:bg-[#222e3e] border border-slate-700/80 text-xs text-slate-200 transition cursor-pointer shrink-0"
@@ -172,11 +172,11 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Center: Grouped Tool Mode Switcher */}
-      <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+      <nav className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
         {TOOL_GROUPS.map((group, gIdx) => (
           <React.Fragment key={gIdx}>
             {gIdx > 0 && <div className="h-5 w-px bg-slate-800/90 mx-0.5 shrink-0" />}
-            <div className="flex items-center gap-0.5 bg-[#0d131b]/70 border border-slate-800/70 rounded-md p-0.5">
+            <div className="flex items-center gap-0.5 bg-[#0d131b]/70 border border-slate-800/70 rounded-md p-0.5 shrink-0">
               {group.map((item) => {
                 const active = tool === item.id;
                 return (
@@ -184,7 +184,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     key={item.id}
                     onClick={() => onSelectTool(item.id)}
                     title={item.shortcut ? `${item.label} (คีย์ลัด ${item.shortcut})` : item.label}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition cursor-pointer ${
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 transition cursor-pointer ${
                       active
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(217,155,56,0.18)]'
                         : 'text-slate-300 hover:bg-[#1e2938] border border-transparent hover:border-slate-700/70'
@@ -198,14 +198,15 @@ export const TopBar: React.FC<TopBarProps> = ({
             </div>
           </React.Fragment>
         ))}
+      </nav>
 
-        <div className="h-5 w-px bg-slate-800 mx-0.5 shrink-0" />
-
+      {/* Right: Undo/Redo + Autosave + Minimap + Generate CTA */}
+      <div className="flex items-center gap-1.5 shrink-0">
         <button
           onClick={onUndo}
           disabled={!canUndo}
           title="ย้อนกลับ (Ctrl+Z)"
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
           <Undo2 className="w-3.5 h-3.5" />
           {undoCount !== undefined && undoCount > 0 && (
@@ -216,17 +217,15 @@ export const TopBar: React.FC<TopBarProps> = ({
           onClick={onRedo}
           disabled={!canRedo}
           title="ทำซ้ำ (Ctrl+Y)"
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
           <Redo2 className="w-3.5 h-3.5" />
           {redoCount !== undefined && redoCount > 0 && (
             <span className="text-[10px] text-sky-300 tabular-nums">{redoCount}</span>
           )}
         </button>
-      </nav>
 
-      {/* Right: Autosave + Minimap + Generate CTA */}
-      <div className="flex items-center gap-1.5 shrink-0">
+        <div className="h-5 w-px bg-slate-800 mx-0.5 shrink-0" />
         <span className="hidden 2xl:inline-flex items-center gap-1.5 text-[11px] text-emerald-400/90 mr-1">
           <span
             className={`w-1.5 h-1.5 rounded-full ${

@@ -12,6 +12,7 @@ import {
   Package,
   Palette,
   Scale,
+  Sparkles,
   Users,
 } from 'lucide-react';
 import { SEASON_LABELS_TH } from '../engine/calendar';
@@ -123,20 +124,20 @@ export const SubBar: React.FC<SubBarProps> = ({
   const isAnalyticOverlay = ANALYTIC_VIEWS.some((v) => v.id === overlay);
 
   return (
-    <div className="h-9 bg-[#151d28] border-b border-slate-800/80 px-2.5 flex items-center justify-between gap-2 text-xs select-none shrink-0 z-20 relative">
+    <div className="min-h-9 py-1 bg-[#151d28] border-b border-slate-800/80 px-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs select-none shrink-0 z-20 relative">
       {/* Left: Clean View Modes + Analytic Dropdown + Compact Layers Popover */}
-      <div className="flex items-center gap-1.5 min-w-0">
-        <span className="hidden md:flex items-center gap-1 text-amber-300/90 font-medium shrink-0">
+      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+        <span className="hidden 2xl:flex items-center gap-1 text-amber-300/90 font-medium shrink-0">
           <Eye className="w-3.5 h-3.5" />
           มุมมอง:
         </span>
 
-        <div className="flex items-center bg-[#0f1620] rounded border border-slate-800 p-0.5 gap-0.5 shrink-0">
+        <div className="flex items-center bg-[#0f1620] rounded border border-slate-800 p-0.5 gap-0.5 shrink-0 overflow-x-auto no-scrollbar max-w-full">
           {PRIMARY_VIEWS.map((m) => (
             <button
               key={m.id}
               onClick={() => onChangeOverlay(m.id)}
-              className={`px-2 py-0.5 rounded text-[11px] transition cursor-pointer ${
+              className={`px-2 py-0.5 rounded text-[11px] whitespace-nowrap shrink-0 transition cursor-pointer ${
                 overlay === m.id
                   ? 'bg-amber-500/25 text-amber-200 font-semibold'
                   : 'text-slate-400 hover:text-slate-200'
@@ -152,7 +153,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           onChange={(e) => {
             if (e.target.value) onChangeOverlay(e.target.value as ClimateOverlay);
           }}
-          className={`px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition ${
+          className={`max-w-[130px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
             isAnalyticOverlay
               ? 'bg-sky-500/20 border-sky-400/60 text-sky-200 font-semibold'
               : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
@@ -160,7 +161,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           title="มุมมองวิเคราะห์ข้อมูลภูมิศาสตร์และสิ่งแวดล้อม"
         >
           <option value="" disabled className="bg-[#0f1620] text-slate-400">
-            วิเคราะห์ข้อมูล...
+            วิเคราะห์...
           </option>
           {ANALYTIC_VIEWS.map((m) => (
             <option key={m.id} value={m.id} className="bg-[#0f1620] text-slate-100">
@@ -172,7 +173,7 @@ export const SubBar: React.FC<SubBarProps> = ({
         <select
           value={mapTheme}
           onChange={(e) => onChangeMapTheme(e.target.value as MapTheme)}
-          className={`px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition ${
+          className={`max-w-[125px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
             mapTheme !== 'standard'
               ? 'bg-amber-500/20 border-amber-400/60 text-amber-200 font-semibold'
               : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
@@ -195,11 +196,11 @@ export const SubBar: React.FC<SubBarProps> = ({
                 );
               }
             }}
-            className="hidden xl:block px-2 py-0.5 rounded border border-slate-800 bg-[#0f1620] text-[11px] text-amber-200 outline-none cursor-pointer hover:border-slate-700"
+            className="hidden xl:block max-w-[120px] truncate px-2 py-0.5 rounded border border-slate-800 bg-[#0f1620] text-[11px] text-amber-200 outline-none cursor-pointer hover:border-slate-700 shrink-0"
             title="สลับพรีเซ็ตมุมมองและชั้นข้อมูลใน 1 คลิก"
           >
             <option value="" disabled className="bg-[#0f1620] text-slate-400">
-              พรีเซ็ตมุมมอง...
+              พรีเซ็ต...
             </option>
             <option value="standard" className="bg-[#0f1620] text-slate-100">มาตรฐาน (ค่าเริ่มต้น)</option>
             <option value="parchment" className="bg-[#0f1620] text-slate-100">แผนที่กระดาษโบราณ</option>
@@ -209,29 +210,29 @@ export const SubBar: React.FC<SubBarProps> = ({
           </select>
         )}
 
-        <div className="h-4 w-px bg-slate-800 mx-0.5 shrink-0" />
+        <div className="hidden sm:block h-4 w-px bg-slate-800 mx-0.5 shrink-0" />
 
         {/* Layers Popover */}
         <div className="relative shrink-0" ref={popoverRef}>
           <button
             onClick={() => setLayersOpen((o) => !o)}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
+            className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] whitespace-nowrap transition cursor-pointer ${
               layersOpen
                 ? 'bg-[#223042] border-amber-500/60 text-amber-200'
                 : 'bg-[#121923] border-slate-800 text-slate-200 hover:border-slate-700'
             }`}
             title="เปิด/ปิดชั้นข้อมูลที่แสดงบนแผนที่"
           >
-            <Layers className="w-3.5 h-3.5 text-amber-400" />
+            <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>ชั้นข้อมูล</span>
-            <span className="text-[10px] px-1 rounded bg-slate-800 text-slate-300">
+            <span className="text-[10px] px-1 rounded bg-slate-800 text-slate-300 tabular-nums">
               {activeLayerCount}/{toggleItems.length}
             </span>
-            <ChevronDown className="w-3 h-3 text-slate-400" />
+            <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
           </button>
 
           {layersOpen && (
-            <div className="absolute left-0 top-full mt-1.5 w-80 bg-[#131b26] border border-slate-700 rounded-xl shadow-2xl p-3 z-40">
+            <div className="absolute left-0 top-full mt-1.5 w-72 sm:w-80 max-w-[calc(100vw-24px)] bg-[#131b26] border border-slate-700 rounded-xl shadow-2xl p-3 z-40">
               <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
                 <span className="text-[11px] font-semibold text-amber-300">
                   ชั้นข้อมูลบนแผนที่ (Layers)
@@ -283,7 +284,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           onChange={(e) =>
             onChangeActiveSeason(e.target.value ? (e.target.value as SeasonId) : null)
           }
-          className={`px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition ${
+          className={`max-w-[110px] truncate px-2 py-0.5 rounded border text-[11px] outline-none cursor-pointer transition shrink-0 ${
             activeSeason
               ? 'bg-sky-500/20 border-sky-400/60 text-sky-200 font-semibold'
               : 'bg-[#0f1620] border-slate-800 text-slate-300 hover:border-slate-700'
@@ -291,7 +292,7 @@ export const SubBar: React.FC<SubBarProps> = ({
           title="สลับฤดูกาลเพื่อดูอุณหภูมิและแนวหิมะ"
         >
           <option value="" className="bg-[#0f1620] text-slate-200">
-            ฤดู: ปกติทั้งปี
+            ฤดู: ปกติ
           </option>
           {(['spring', 'summer', 'autumn', 'winter'] as SeasonId[]).map((sid) => (
             <option key={sid} value={sid} className="bg-[#0f1620] text-slate-100">
@@ -302,18 +303,18 @@ export const SubBar: React.FC<SubBarProps> = ({
       </div>
 
       {/* Right: Stats + Modals */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <div className="hidden xl:flex items-center gap-1 bg-[#111720] px-2 py-0.5 rounded border border-slate-800 text-[11px]">
-          <Users className="w-3 h-3 text-amber-400" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="hidden 2xl:flex items-center gap-1 bg-[#111720] px-2 py-0.5 rounded border border-slate-800 text-[11px] whitespace-nowrap shrink-0">
+          <Users className="w-3 h-3 text-amber-400 shrink-0" />
           <span className="font-semibold text-slate-100">{totalPop.toLocaleString()}</span>
         </div>
 
         <button
           onClick={onOpenSizeModal}
-          className="hidden lg:flex items-center gap-1 bg-[#111720] hover:bg-[#1a2330] px-2 py-0.5 rounded border border-slate-800 hover:border-slate-700 text-[11px] transition cursor-pointer"
+          className="hidden 2xl:flex items-center gap-1 bg-[#111720] hover:bg-[#1a2330] px-2 py-0.5 rounded border border-slate-800 hover:border-slate-700 text-[11px] whitespace-nowrap shrink-0 transition cursor-pointer"
           title="ปรับขนาดแผนที่และระยะจริง"
         >
-          <Scale className="w-3 h-3 text-sky-400" />
+          <Scale className="w-3 h-3 text-sky-400 shrink-0" />
           <span className="text-sky-200">
             {Math.round(dims.widthKm).toLocaleString()} × {Math.round(dims.heightKm).toLocaleString()} กม.
           </span>
@@ -321,84 +322,80 @@ export const SubBar: React.FC<SubBarProps> = ({
 
         <button
           onClick={onOpenSimulateModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-[11px] text-amber-200 font-medium transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-[11px] text-amber-200 font-medium whitespace-nowrap shrink-0 transition cursor-pointer"
           title="จำลองโลกจากแผนที่ปัจจุบันครบทุกมิติ (ธรณี อากาศ แม่น้ำ ลักษณะพิเศษ เมือง การเมือง การค้า)"
         >
-          <Globe2Icon />
+          <Sparkles className="w-3 h-3 text-amber-300 shrink-0" />
           <span>จำลองทุกมิติ</span>
         </button>
 
         <button
           onClick={onOpenCalendarModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
           title="ปฏิทินโลก ดวงจันทร์ และจำลองฤดูกาล"
         >
-          <Calendar className="w-3 h-3 text-sky-400" />
-          <span className="hidden xl:inline">ปฏิทิน</span>
+          <Calendar className="w-3 h-3 text-sky-400 shrink-0" />
+          <span className="hidden lg:inline">ปฏิทิน</span>
         </button>
 
         <button
           onClick={onToggleTimelineBar}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] transition cursor-pointer ${
+          className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] whitespace-nowrap shrink-0 transition cursor-pointer ${
             showTimelineBar
               ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-medium'
               : 'bg-[#1b2533] hover:bg-[#243144] border-slate-700/80 text-slate-200'
           }`}
           title="เปิด/ปิดแถบ Timeline ประวัติศาสตร์ยุคสมัย"
         >
-          <Clock className="w-3 h-3 text-amber-400" />
-          <span>Timeline</span>
+          <Clock className="w-3 h-3 text-amber-400 shrink-0" />
+          <span className="hidden sm:inline">Timeline</span>
         </button>
 
         <button
           onClick={onOpenCustomModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
           title="ปรับแต่งและสร้างภูมิประเทศ ไบโอม ลักษณะพิเศษ และ POI"
         >
-          <Palette className="w-3 h-3 text-violet-400" />
+          <Palette className="w-3 h-3 text-violet-400 shrink-0" />
           <span className="hidden 2xl:inline">ปรับแต่งโลก</span>
         </button>
 
         <button
           onClick={onOpenWorldbuildingModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
-          title="การทูตระหว่างรัฐ เส้นทางเดินทัพ สารานุกรม Wiki และส่งออก Lorebook"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
+          title="การทูตระหว่างรัฐ เส้นทางเดินทัพ ยุทธศาสตร์ และสารานุกรม Wiki"
         >
-          <BookOpen className="w-3 h-3 text-amber-300" />
-          <span>การทูต & Wiki</span>
+          <BookOpen className="w-3 h-3 text-amber-300 shrink-0" />
+          <span className="hidden md:inline">การทูต & Wiki</span>
         </button>
 
         <button
           onClick={onOpenHeightmapModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
           title="นำเข้าภาพ Heightmap / ภาพร่างลอกลาย และเจาะแผนที่ภูมิภาค Sub-Map"
         >
-          <Crop className="w-3 h-3 text-sky-400" />
-          <span className="hidden xl:inline">Heightmap / Sub-Map</span>
-          <span className="xl:hidden">Sub-Map</span>
+          <Crop className="w-3 h-3 text-sky-400 shrink-0" />
+          <span className="hidden 2xl:inline">Heightmap / Sub-Map</span>
+          <span className="2xl:hidden hidden sm:inline">Sub-Map</span>
         </button>
 
         <button
           onClick={onOpenEconomyModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
         >
-          <Package className="w-3 h-3 text-amber-400" />
+          <Package className="w-3 h-3 text-amber-400 shrink-0" />
           <span className="hidden 2xl:inline">สินค้า · รัฐ · ศาสนา · วัฒนธรรม</span>
-          <span className="2xl:hidden">รัฐ/เศรษฐกิจ</span>
+          <span className="2xl:hidden hidden sm:inline">รัฐ/เศรษฐกิจ</span>
         </button>
 
         <button
           onClick={onOpenExportModal}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 transition cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b2533] hover:bg-[#243144] border border-slate-700/80 text-[11px] text-slate-200 whitespace-nowrap shrink-0 transition cursor-pointer"
         >
-          <Download className="w-3 h-3 text-emerald-400" />
+          <Download className="w-3 h-3 text-emerald-400 shrink-0" />
           <span>ส่งออก</span>
         </button>
       </div>
     </div>
   );
 };
-
-function Globe2Icon() {
-  return <Layers className="w-3 h-3 text-amber-300" />;
-}

@@ -1786,7 +1786,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
 
       {/* Bottom-Center Telemetry */}
       {hoverHex && hoverInfo && (
-        <div className="hidden md:flex absolute bottom-3 left-1/2 -translate-x-1/2 items-center gap-2.5 bg-[#111720]/92 border border-slate-700/75 rounded-full px-4 py-1 text-[11px] text-slate-200 pointer-events-none shadow-lg whitespace-nowrap max-w-[75vw] overflow-hidden">
+        <div className="hidden lg:flex absolute bottom-3 left-1/2 -translate-x-1/2 items-center gap-2 bg-[#111720]/92 border border-slate-700/75 rounded-full px-3.5 py-1 text-[11px] text-slate-200 pointer-events-none shadow-lg whitespace-nowrap max-w-[calc(100%-390px)] overflow-hidden">
           <span className="text-slate-400">
             ({hoverHex.q}, {hoverHex.r}) · {hoverInfo.latStr}, {hoverInfo.lonStr}
           </span>
