@@ -33,6 +33,9 @@ import {
   computeTectonicField,
   computeTectonicSummary,
   createTectonicPreset,
+  randomizePlateDirections,
+  randomizePlateTypes,
+  randomizeTectonicPlates,
   TectonicPresetId,
 } from '../tectonics';
 import {
@@ -2125,5 +2128,72 @@ describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () =>
     );
     expect(sub.width).toBe(400);
     expect(sub.height).toBe(300);
+  });
+
+  it('randomizes tectonic plates with count, continental ratio, drift bias, activity speed, and partial rerolls', () => {
+    const base = generateWorld(52, 36, 25, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 4444,
+    });
+
+    const lowLand = randomizeTectonicPlates(base, {
+      plateCount: 10,
+      continentalRatio: 0.2,
+      activity: 'calm',
+      bias: 'rifting',
+      seed: 101,
+    });
+    expect(lowLand).toHaveLength(10);
+    expect(lowLand.filter((p) => !p.isOceanic)).toHaveLength(2);
+    const calmAvgSpeed =
+      lowLand.reduce((s, p) => s + Math.hypot(p.vx, p.vy), 0) / lowLand.length;
+    expect(calmAvgSpeed).toBeLessThanOrEqual(0.6);
+
+    const highLand = randomizeTectonicPlates(base, {
+      plateCount: 10,
+      continentalRatio: 0.8,
+      activity: 'chaotic',
+      bias: 'collision',
+      seed: 202,
+    });
+    expect(highLand).toHaveLength(10);
+    expect(highLand.filter((p) => !p.isOceanic)).toHaveLength(8);
+    const chaoticAvgSpeed =
+      highLand.reduce((s, p) => s + Math.hypot(p.vx, p.vy), 0) / highLand.length;
+    expect(chaoticAvgSpeed).toBeGreaterThanOrEqual(0.8);
+
+    // Distinct seeds produce distinct plate centers
+    expect(
+      highLand.some((p, i) => p.centerQ !== lowLand[i].centerQ || p.centerR !== lowLand[i].centerR)
+    ).toBe(true);
+
+    const collisionField = computeTectonicField(
+      base.width,
+      base.height,
+      base.geography.seed,
+      highLand.length,
+      highLand
+    );
+    expect(computeTectonicSummary(collisionField).convergent).toBeGreaterThan(0);
+
+    // Partial re-roll: directions only preserves centers and continental flags
+    const rerolledDirs = randomizePlateDirections(highLand, {
+      width: base.width,
+      height: base.height,
+      activity: 'calm',
+      bias: 'rifting',
+      seed: 777,
+    });
+    expect(rerolledDirs[0].centerQ).toBe(highLand[0].centerQ);
+    expect(rerolledDirs[0].isOceanic).toBe(highLand[0].isOceanic);
+    expect(
+      rerolledDirs.some((p, i) => p.vx !== highLand[i].vx || p.vy !== highLand[i].vy)
+    ).toBe(true);
+
+    // Partial re-roll: types only preserves centers and velocity vectors
+    const rerolledTypes = randomizePlateTypes(highLand, 0.3, 888);
+    expect(rerolledTypes.filter((p) => !p.isOceanic)).toHaveLength(3);
+    expect(rerolledTypes[0].centerQ).toBe(highLand[0].centerQ);
+    expect(rerolledTypes[0].vx).toBe(highLand[0].vx);
   });
 });

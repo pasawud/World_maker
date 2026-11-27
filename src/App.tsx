@@ -410,6 +410,10 @@ export function App() {
           onBeginTectonicDrag={editor.beginTectonicDrag}
           onLiveUpdateTectonicPlates={editor.liveUpdateCustomTectonicPlates}
           onEndTectonicDrag={editor.endTectonicDrag}
+          onQuickRandomizeTectonics={() => {
+            editor.runRandomizeTectonicPlates();
+            showToast('สุ่มระบบแผ่นเปลือกโลกใหม่แล้ว');
+          }}
           onSelectSubMapZone={(bounds) => {
             editor.setPendingSubMapBounds(bounds);
             setShowHeightmapModal(true);
@@ -639,6 +643,22 @@ export function App() {
           onApplyTectonicPreset={(preset, count) => {
             editor.applyTectonicPreset(preset, count);
             showToast('ใช้เทมเพลตแผ่นเปลือกโลกสำเร็จรูปแล้ว');
+          }}
+          onRandomizeTectonicPlates={(opts) => {
+            editor.runRandomizeTectonicPlates(opts);
+            showToast(
+              opts.autoBuildWorld
+                ? 'สุ่มแผ่นเปลือกโลกและสร้างแผนที่โลกใหม่แล้ว'
+                : 'สุ่มระบบแผ่นเปลือกโลกใหม่แล้ว'
+            );
+          }}
+          onRandomizeTectonicDirections={(activity, bias) => {
+            editor.runRandomizePlateDirections(activity, bias);
+            showToast('สุ่มทิศทางการเคลื่อนตัวของแผ่นเปลือกโลกแล้ว');
+          }}
+          onRandomizeTectonicTypes={(ratio) => {
+            editor.runRandomizePlateTypes(ratio);
+            showToast('สุ่มสัดส่วนแผ่นทวีป / มหาสมุทรแล้ว');
           }}
           onDeleteTectonicPlate={(id) => {
             editor.deleteTectonicPlateById(id);

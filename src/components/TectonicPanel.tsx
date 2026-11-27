@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Compass,
   Crosshair,
+  Dices,
   Eye,
   Globe,
   Layers,
@@ -8,6 +10,7 @@ import {
   Mountain,
   Plus,
   RotateCcw,
+  Shuffle,
   Sparkles,
   Trash2,
 } from 'lucide-react';
@@ -15,7 +18,10 @@ import {
   computeTectonicField,
   computeTectonicSummary,
   createCustomPlatesFromCurrent,
+  TectonicActivityLevel,
+  TectonicDriftBias,
   TectonicPresetId,
+  TectonicRandomOptions,
 } from '../engine/tectonics';
 import { ClimateOverlay, CustomTectonicPlate, HexMapData } from '../types/map';
 
@@ -33,6 +39,11 @@ interface TectonicPanelProps {
   onChangeAddOceanic: (v: boolean) => void;
   onSelectPlate: (id: string | null) => void;
   onApplyPreset: (preset: TectonicPresetId, count?: number) => void;
+  onRandomizePlates: (
+    opts: TectonicRandomOptions & { autoBuildWorld?: boolean; strength?: number }
+  ) => void;
+  onRandomizeDirections: (activity: TectonicActivityLevel, bias: TectonicDriftBias) => void;
+  onRandomizeTypes: (continentalRatio: number) => void;
   onInitCustomPlates: () => void;
   onUpdateCustomPlates: (plates: CustomTectonicPlate[] | undefined) => void;
   onDeletePlate: (id: string) => void;
@@ -65,6 +76,9 @@ export const TectonicPanel: React.FC<TectonicPanelProps> = ({
   onChangeAddOceanic,
   onSelectPlate,
   onApplyPreset,
+  onRandomizePlates,
+  onRandomizeDirections,
+  onRandomizeTypes,
   onInitCustomPlates,
   onUpdateCustomPlates,
   onDeletePlate,
@@ -73,7 +87,10 @@ export const TectonicPanel: React.FC<TectonicPanelProps> = ({
   onApplyTectonicsToCurrent,
   onUpdateGeographyStrength,
 }) => {
-  const [randomCount, setRandomCount] = useState<number>(6);
+  const [plateCount, setPlateCount] = useState<number>(7);
+  const [continentalRatio, setContinentalRatio] = useState<number>(0.45);
+  const [bias, setBias] = useState<TectonicDriftBias>('mixed');
+  const [activity, setActivity] = useState<TectonicActivityLevel>('balanced');
   const [strength, setStrength] = useState<number>(() =>
     map.geography.tectonicStrength && map.geography.tectonicStrength > 0
       ? map.geography.tectonicStrength
@@ -249,25 +266,158 @@ export const TectonicPanel: React.FC<TectonicPanelProps> = ({
         )}
       </div>
 
+      {/* Tectonic Randomizer */}
+      <div className="bg-[#151d28] border border-violet-500/40 rounded-lg p-2.5 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-violet-300 flex items-center gap-1.5">
+            <Dices className="w-3.5 h-3.5 text-amber-300" />
+            สุ่มระบบแปรสัณฐาน (Randomizer)
+          </span>
+          <span className="text-[10px] text-slate-400 tabular-nums">{plateCount} แผ่น</span>
+        </div>
+
+        <div className="space-y-1.5">
+          <div>
+            <div className="flex justify-between text-[10px] mb-0.5">
+              <span className="text-slate-300">จำนวนแผ่นเปลือกโลก</span>
+              <span className="text-amber-300 tabular-nums">{plateCount} แผ่น</span>
+            </div>
+            <input
+              type="range"
+              min={3}
+              max={16}
+              step={1}
+              value={plateCount}
+              onChange={(e) => setPlateCount(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <div className="flex justify-between text-[10px] mb-0.5">
+              <span className="text-slate-300">สัดส่วน ทวีป / มหาสมุทร</span>
+              <span className="text-sky-300 tabular-nums">
+                ทวีป {Math.round(continentalRatio * 100)}% / สมุทร{' '}
+                {Math.round((1 - continentalRatio) * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.15}
+              max={0.85}
+              step={0.05}
+              value={continentalRatio}
+              onChange={(e) => setContinentalRatio(Number(e.target.value))}
+              className="w-full"
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] text-slate-400 mb-1">แนวโน้มทิศการเคลื่อนตัว (Drift Bias)</div>
+          <div className="grid grid-cols-4 gap-1 text-[10px]">
+            {(
+              [
+                ['mixed', 'ผสมผสาน'],
+                ['collision', 'ชนกัน'],
+                ['rifting', 'แยกตัว'],
+                ['subduction', 'มุดตัว'],
+              ] as [TectonicDriftBias, string][]
+            ).map(([id, lbl]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setBias(id)}
+                className={`py-1 rounded border cursor-pointer ${
+                  bias === id
+                    ? 'bg-violet-500/25 border-violet-400 text-violet-100 font-semibold'
+                    : 'bg-[#0e151f] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] text-slate-400 mb-1">ระดับพลังธรณี (Activity)</div>
+          <div className="grid grid-cols-3 gap-1 text-[10px]">
+            {(
+              [
+                ['calm', 'สงบ'],
+                ['balanced', 'สมดุล'],
+                ['chaotic', 'รุนแรง'],
+              ] as [TectonicActivityLevel, string][]
+            ).map(([id, lbl]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActivity(id)}
+                className={`py-1 rounded border cursor-pointer ${
+                  activity === id
+                    ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-semibold'
+                    : 'bg-[#0e151f] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5 pt-0.5 text-[11px]">
+          <button
+            type="button"
+            onClick={() => onRandomizePlates({ plateCount, continentalRatio, activity, bias })}
+            className="flex items-center justify-center gap-1 py-1.5 px-2 rounded bg-violet-500/25 hover:bg-violet-500/35 border border-violet-400/60 text-violet-100 font-medium cursor-pointer"
+          >
+            <Dices className="w-3.5 h-3.5 text-amber-300" />
+            สุ่มแผ่นใหม่
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onRandomizePlates({
+                plateCount,
+                continentalRatio,
+                activity,
+                bias,
+                autoBuildWorld: true,
+                strength,
+              })
+            }
+            className="flex items-center justify-center gap-1 py-1.5 px-2 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            สุ่ม+สร้างโลก
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+          <button
+            type="button"
+            onClick={() => onRandomizeDirections(activity, bias)}
+            className="flex items-center justify-center gap-1 py-1 rounded bg-[#0e151f] hover:bg-[#192434] border border-slate-800 text-slate-300 cursor-pointer"
+          >
+            <Compass className="w-3 h-3 text-sky-400" />
+            สุ่มเฉพาะทิศทาง
+          </button>
+          <button
+            type="button"
+            onClick={() => onRandomizeTypes(continentalRatio)}
+            className="flex items-center justify-center gap-1 py-1 rounded bg-[#0e151f] hover:bg-[#192434] border border-slate-800 text-slate-300 cursor-pointer"
+          >
+            <Shuffle className="w-3 h-3 text-emerald-400" />
+            สุ่มทวีป / สมุทร
+          </button>
+        </div>
+      </div>
+
       {/* 1-Click Presets */}
       <div className="bg-[#151d28] border border-slate-800 rounded-lg p-2.5 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold text-sky-300">เทมเพลตแผ่นเปลือกโลก (1 คลิก)</span>
-          <div className="flex items-center gap-1 text-[10px] text-slate-400">
-            <span>สุ่ม:</span>
-            <select
-              value={randomCount}
-              onChange={(e) => setRandomCount(Number(e.target.value))}
-              className="bg-[#0e151f] border border-slate-700 rounded px-1 py-0.5 text-slate-200 outline-none"
-              title="จำนวนแผ่นสำหรับปุ่มสุ่มสมดุล"
-            >
-              {[4, 5, 6, 7, 8, 9, 10, 12].map((n) => (
-                <option key={n} value={n}>
-                  {n} แผ่น
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-1.5">
@@ -275,7 +425,7 @@ export const TectonicPanel: React.FC<TectonicPanelProps> = ({
             <button
               key={pr.id}
               type="button"
-              onClick={() => onApplyPreset(pr.id, randomCount)}
+              onClick={() => onApplyPreset(pr.id, plateCount)}
               title={pr.desc}
               className="text-left px-2 py-1.5 rounded bg-[#0e151f] hover:bg-[#192434] border border-slate-800 hover:border-sky-500/50 transition cursor-pointer"
             >

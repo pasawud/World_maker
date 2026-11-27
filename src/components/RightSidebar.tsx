@@ -44,7 +44,12 @@ import {
   computeReligionStats,
   computeTerritoryStats,
 } from '../engine/politics';
-import { TectonicPresetId } from '../engine/tectonics';
+import {
+  TectonicActivityLevel,
+  TectonicDriftBias,
+  TectonicPresetId,
+  TectonicRandomOptions,
+} from '../engine/tectonics';
 import {
   City,
   ClimateOverlay,
@@ -113,6 +118,11 @@ interface RightSidebarProps {
   onChangeTectonicAddOceanic?: (v: boolean) => void;
   onSelectTectonicPlate?: (id: string | null) => void;
   onApplyTectonicPreset?: (preset: TectonicPresetId, count?: number) => void;
+  onRandomizeTectonicPlates?: (
+    opts: TectonicRandomOptions & { autoBuildWorld?: boolean; strength?: number }
+  ) => void;
+  onRandomizeTectonicDirections?: (activity: TectonicActivityLevel, bias: TectonicDriftBias) => void;
+  onRandomizeTectonicTypes?: (continentalRatio: number) => void;
   onDeleteTectonicPlate?: (id: string) => void;
   onGenerateWorldFromPlates?: (strength: number) => void;
   onOpenTectonicTool?: () => void;
@@ -217,6 +227,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onChangeTectonicAddOceanic,
     onSelectTectonicPlate,
     onApplyTectonicPreset,
+    onRandomizeTectonicPlates,
+    onRandomizeTectonicDirections,
+    onRandomizeTectonicTypes,
     onDeleteTectonicPlate,
     onGenerateWorldFromPlates,
     onOpenTectonicTool,
@@ -1467,6 +1480,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
           onChangeAddOceanic={(v) => onChangeTectonicAddOceanic?.(v)}
           onSelectPlate={(id) => onSelectTectonicPlate?.(id)}
           onApplyPreset={(preset, count) => onApplyTectonicPreset?.(preset, count)}
+          onRandomizePlates={(opts) => onRandomizeTectonicPlates?.(opts)}
+          onRandomizeDirections={(activity, bias) => onRandomizeTectonicDirections?.(activity, bias)}
+          onRandomizeTypes={(ratio) => onRandomizeTectonicTypes?.(ratio)}
           onInitCustomPlates={onInitCustomPlates}
           onUpdateCustomPlates={onUpdateCustomPlates}
           onDeletePlate={(id) => onDeleteTectonicPlate?.(id)}

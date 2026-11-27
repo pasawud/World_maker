@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  Dices,
   Droplets,
   Eraser,
   Layers,
@@ -197,6 +198,7 @@ interface MapCanvasProps {
     updater: (plates: CustomTectonicPlate[]) => CustomTectonicPlate[]
   ) => void;
   onEndTectonicDrag?: () => void;
+  onQuickRandomizeTectonics?: () => void;
   onNotify: (msg: string) => void;
 }
 
@@ -317,6 +319,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onBeginTectonicDrag,
     onLiveUpdateTectonicPlates,
     onEndTectonicDrag,
+    onQuickRandomizeTectonics,
     onNotify,
   } = props;
 
@@ -2022,6 +2025,18 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
               >
                 <Trash2 className="w-3.5 h-3.5" /> ลบแผ่น
               </button>
+              {onQuickRandomizeTectonics && (
+                <>
+                  <div className="h-4 w-px bg-slate-700" />
+                  <button
+                    onClick={onQuickRandomizeTectonics}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-violet-500/25 hover:bg-violet-500/35 border border-violet-400/50 text-violet-100 cursor-pointer"
+                    title="สุ่มแผ่นเปลือกโลกชุดใหม่ทันที"
+                  >
+                    <Dices className="w-3.5 h-3.5 text-amber-300" /> สุ่มแผ่น
+                  </button>
+                </>
+              )}
               {tectonicSubTool === 'add' && (
                 <>
                   <div className="h-4 w-px bg-slate-700" />

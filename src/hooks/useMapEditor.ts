@@ -38,7 +38,13 @@ import {
   applyTectonicsToCurrentMap,
   createCustomPlatesFromCurrent,
   createTectonicPreset,
+  randomizePlateDirections,
+  randomizePlateTypes,
+  randomizeTectonicPlates,
+  TectonicActivityLevel,
+  TectonicDriftBias,
   TectonicPresetId,
+  TectonicRandomOptions,
 } from '../engine/tectonics';
 import {
   autoPlaceSpecialFeatures,
@@ -2239,20 +2245,104 @@ export function useMapEditor() {
   const applyTectonicPreset = useCallback(
     (preset: TectonicPresetId, plateCount = 6) => {
       let firstId: string | null = null;
+      const freshSeed = Math.floor(10000 + Math.random() * 9999999);
       commitMapChange((prev) => {
-        const nextPlates = createTectonicPreset(preset, prev, plateCount);
+        const nextPlates = createTectonicPreset(
+          preset,
+          prev,
+          plateCount,
+          preset === 'balanced_random' ? freshSeed : prev.geography.seed
+        );
         firstId = nextPlates[0]?.id ?? null;
         return {
           ...prev,
           customTectonicPlates: nextPlates,
           geography: {
             ...prev.geography,
+            ...(preset === 'balanced_random' ? { seed: freshSeed } : {}),
             tectonicPlates: nextPlates.length,
           },
         };
       });
       setSelectedTectonicPlateId(firstId);
       setTectonicEditPlateId(null);
+      setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
+    },
+    [commitMapChange]
+  );
+
+  const runRandomizeTectonicPlates = useCallback(
+    (
+      options: TectonicRandomOptions & { autoBuildWorld?: boolean; strength?: number } = {}
+    ) => {
+      let firstId: string | null = null;
+      const seed = options.seed ?? Math.floor(10000 + Math.random() * 9999999);
+      commitMapChange((prev) => {
+        const nextPlates = randomizeTectonicPlates(prev, { ...options, seed });
+        firstId = nextPlates[0]?.id ?? null;
+        const withPlates: HexMapData = {
+          ...prev,
+          customTectonicPlates: nextPlates,
+          geography: {
+            ...prev.geography,
+            seed,
+            tectonicPlates: nextPlates.length,
+          },
+        };
+        if (options.autoBuildWorld) {
+          return generateWorldFromTectonicPlates(
+            withPlates,
+            options.strength ??
+              (prev.geography.tectonicStrength && prev.geography.tectonicStrength > 0
+                ? prev.geography.tectonicStrength
+                : 0.85)
+          );
+        }
+        return withPlates;
+      });
+      setSelectedTectonicPlateId(firstId);
+      setTectonicEditPlateId(null);
+      setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
+      if (options.autoBuildWorld) {
+        setSelectedCityId(null);
+        setTradeStartCityId(null);
+        setClimateOverlay('none');
+      }
+    },
+    [commitMapChange]
+  );
+
+  const runRandomizePlateDirections = useCallback(
+    (activity: TectonicActivityLevel = 'balanced', bias: TectonicDriftBias = 'mixed') => {
+      const seed = Math.floor(10000 + Math.random() * 9999999);
+      commitMapChange((prev) => {
+        const current = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+        return {
+          ...prev,
+          customTectonicPlates: randomizePlateDirections(current, {
+            width: prev.width,
+            height: prev.height,
+            activity,
+            bias,
+            seed,
+          }),
+        };
+      });
+      setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
+    },
+    [commitMapChange]
+  );
+
+  const runRandomizePlateTypes = useCallback(
+    (continentalRatio = 0.45) => {
+      const seed = Math.floor(10000 + Math.random() * 9999999);
+      commitMapChange((prev) => {
+        const current = prev.customTectonicPlates ?? createCustomPlatesFromCurrent(prev);
+        return {
+          ...prev,
+          customTectonicPlates: randomizePlateTypes(current, continentalRatio, seed),
+        };
+      });
       setLayers((l) => (l.tectonics ? l : { ...l, tectonics: true }));
     },
     [commitMapChange]
@@ -2628,6 +2718,9 @@ export function useMapEditor() {
     updateCustomTectonicPlates,
     initCustomTectonicPlates,
     applyTectonicPreset,
+    runRandomizeTectonicPlates,
+    runRandomizePlateDirections,
+    runRandomizePlateTypes,
     addTectonicPlateAt,
     deleteTectonicPlateById,
     placeOrMoveTectonicPlateAt,

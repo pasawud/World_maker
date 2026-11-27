@@ -431,6 +431,210 @@ export function createTectonicPreset(
   return plates;
 }
 
+export type TectonicActivityLevel = 'calm' | 'balanced' | 'chaotic';
+export type TectonicDriftBias = 'mixed' | 'collision' | 'rifting' | 'subduction';
+
+export interface TectonicRandomOptions {
+  plateCount?: number; // 3..16 (default 7)
+  continentalRatio?: number; // 0.15..0.85 (default 0.45)
+  activity?: TectonicActivityLevel;
+  bias?: TectonicDriftBias;
+  seed?: number;
+}
+
+function getActivitySpeedRange(activity: TectonicActivityLevel): [number, number] {
+  if (activity === 'calm') return [0.25, 0.55];
+  if (activity === 'chaotic') return [0.85, 1.3];
+  return [0.55, 0.95];
+}
+
+function assignBiasedVectors(
+  plates: { centerQ: number; centerR: number; isOceanic?: boolean }[],
+  width: number,
+  height: number,
+  activity: TectonicActivityLevel,
+  bias: TectonicDriftBias,
+  rng: () => number
+): { vx: number; vy: number }[] {
+  const [minSpd, maxSpd] = getActivitySpeedRange(activity);
+  const cx = (width - 1) * 0.5;
+  const cy = (height - 1) * 0.5;
+  const riftAngle = (rng() - 0.5) * 0.9; // tilt for rifting seam axis
+  const riftNx = Math.cos(riftAngle);
+  const riftNy = Math.sin(riftAngle);
+
+  return plates.map((pl, idx) => {
+    const spd = minSpd + rng() * (maxSpd - minSpd);
+    let ang = rng() * Math.PI * 2;
+
+    if (bias === 'collision') {
+      const dx = cx - pl.centerQ;
+      const dy = cy - pl.centerR;
+      const baseAng = Math.hypot(dx, dy) > 1 ? Math.atan2(dy, dx) : rng() * Math.PI * 2;
+      ang = baseAng + (rng() - 0.5) * 0.9;
+    } else if (bias === 'rifting') {
+      const side = (pl.centerQ - cx) * riftNx + (pl.centerR - cy) * riftNy;
+      const sign = side >= 0 ? 1 : -1;
+      const baseAng = Math.atan2(riftNy * sign, riftNx * sign);
+      ang = baseAng + (rng() - 0.5) * 0.85;
+    } else if (bias === 'subduction') {
+      if (pl.isOceanic) {
+        let bestD2 = Infinity;
+        let targetQ = cx;
+        let targetR = cy;
+        for (let j = 0; j < plates.length; j++) {
+          if (j === idx || plates[j].isOceanic) continue;
+          const dq = plates[j].centerQ - pl.centerQ;
+          const dr = plates[j].centerR - pl.centerR;
+          const d2 = dq * dq + dr * dr;
+          if (d2 < bestD2) {
+            bestD2 = d2;
+            targetQ = plates[j].centerQ;
+            targetR = plates[j].centerR;
+          }
+        }
+        const dx = targetQ - pl.centerQ;
+        const dy = targetR - pl.centerR;
+        ang = Math.hypot(dx, dy) > 1 ? Math.atan2(dy, dx) + (rng() - 0.5) * 0.65 : rng() * Math.PI * 2;
+      } else {
+        const dx = cx - pl.centerQ;
+        const dy = cy - pl.centerR;
+        ang = (Math.hypot(dx, dy) > 1 ? Math.atan2(dy, dx) : rng() * Math.PI * 2) + (rng() - 0.5) * 1.4;
+      }
+    }
+
+    return {
+      vx: Number((Math.cos(ang) * spd).toFixed(2)),
+      vy: Number((Math.sin(ang) * spd).toFixed(2)),
+    };
+  });
+}
+
+/** Generate fully randomized tectonic plates with stratified spatial layout, land/sea ratio, activity & drift bias. */
+export function randomizeTectonicPlates(
+  map: HexMapData,
+  options: TectonicRandomOptions = {}
+): CustomTectonicPlate[] {
+  const { width, height } = map;
+  const count = Math.max(3, Math.min(16, Math.round(options.plateCount ?? 7)));
+  const ratio = Math.max(0.15, Math.min(0.85, options.continentalRatio ?? 0.45));
+  const activity: TectonicActivityLevel = options.activity ?? 'balanced';
+  const bias: TectonicDriftBias = options.bias ?? 'mixed';
+  const effSeed = options.seed ?? Math.floor(10000 + Math.random() * 9999999);
+  const rng = mulberry32(effSeed + count * 131);
+
+  const cols = count <= 4 ? 2 : count <= 9 ? 3 : 4;
+  const rows = Math.ceil(count / cols);
+  const cellIndices = Array.from({ length: cols * rows }, (_, i) => i);
+  for (let i = cellIndices.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = cellIndices[i];
+    cellIndices[i] = cellIndices[j];
+    cellIndices[j] = tmp;
+  }
+
+  const continentalCount = Math.max(1, Math.min(count - 1, Math.round(count * ratio)));
+  const typeFlags = Array.from({ length: count }, (_, i) => i >= continentalCount); // true = oceanic
+  for (let i = typeFlags.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = typeFlags[i];
+    typeFlags[i] = typeFlags[j];
+    typeFlags[j] = tmp;
+  }
+
+  const namePool = [...PLATE_NAMES];
+  for (let i = namePool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = namePool[i];
+    namePool[i] = namePool[j];
+    namePool[j] = tmp;
+  }
+
+  const colorPool = [...PLATE_COLORS];
+  for (let i = colorPool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = colorPool[i];
+    colorPool[i] = colorPool[j];
+    colorPool[j] = tmp;
+  }
+
+  const baseSpecs: { centerQ: number; centerR: number; isOceanic: boolean }[] = [];
+  for (let i = 0; i < count; i++) {
+    const cell = cellIndices[i];
+    const gx = cell % cols;
+    const gy = Math.floor(cell / cols);
+    const fx = (gx + 0.18 + rng() * 0.64) / cols;
+    const fy = (gy + 0.18 + rng() * 0.64) / rows;
+    baseSpecs.push({
+      centerQ: Math.max(0, Math.min(width - 1, Math.round(width * fx))),
+      centerR: Math.max(0, Math.min(height - 1, Math.round(height * fy))),
+      isOceanic: typeFlags[i],
+    });
+  }
+
+  const vectors = assignBiasedVectors(baseSpecs, width, height, activity, bias, rng);
+  return baseSpecs.map((spec, i) => ({
+    id: `rand_${effSeed.toString(36)}_${i + 1}`,
+    name: namePool[i % namePool.length],
+    color: colorPool[i % colorPool.length],
+    centerQ: spec.centerQ,
+    centerR: spec.centerR,
+    vx: vectors[i].vx,
+    vy: vectors[i].vy,
+    isOceanic: spec.isOceanic,
+  }));
+}
+
+/** Re-roll only drift vectors (vx, vy) on existing plates according to activity and drift bias. */
+export function randomizePlateDirections(
+  plates: CustomTectonicPlate[],
+  options: {
+    width: number;
+    height: number;
+    activity?: TectonicActivityLevel;
+    bias?: TectonicDriftBias;
+    seed?: number;
+  }
+): CustomTectonicPlate[] {
+  const rng = mulberry32(options.seed ?? Math.floor(10000 + Math.random() * 9999999));
+  const vectors = assignBiasedVectors(
+    plates,
+    options.width,
+    options.height,
+    options.activity ?? 'balanced',
+    options.bias ?? 'mixed',
+    rng
+  );
+  return plates.map((p, i) => ({
+    ...p,
+    vx: vectors[i].vx,
+    vy: vectors[i].vy,
+  }));
+}
+
+/** Re-roll only continental vs oceanic plate classification while keeping positions and drift vectors. */
+export function randomizePlateTypes(
+  plates: CustomTectonicPlate[],
+  continentalRatio = 0.45,
+  seed?: number
+): CustomTectonicPlate[] {
+  if (plates.length < 2) return plates;
+  const rng = mulberry32(seed ?? Math.floor(10000 + Math.random() * 9999999));
+  const ratio = Math.max(0.15, Math.min(0.85, continentalRatio));
+  const continentalCount = Math.max(1, Math.min(plates.length - 1, Math.round(plates.length * ratio)));
+  const flags = Array.from({ length: plates.length }, (_, i) => i >= continentalCount);
+  for (let i = flags.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = flags[i];
+    flags[i] = flags[j];
+    flags[j] = tmp;
+  }
+  return plates.map((p, i) => ({
+    ...p,
+    isOceanic: flags[i],
+  }));
+}
+
 /** Generate editable custom plate definitions seeded from the map's current tectonic field. */
 export function createCustomPlatesFromCurrent(map: HexMapData): CustomTectonicPlate[] {
   const field = computeTectonicField(
