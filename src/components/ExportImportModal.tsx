@@ -1,5 +1,10 @@
 import React, { useRef, useState } from 'react';
 import { Camera, Download, FileText, FolderOpen, Save, Trash2, Upload, X } from 'lucide-react';
+import {
+  exportHeightmapPng,
+  exportInteractiveAtlasHtml,
+  exportVttGridJson,
+} from '../engine/proExport';
 import { exportMapToPng } from '../engine/renderer';
 import { exportLorebookHtml, exportLorebookMarkdown } from '../engine/worldbuilding';
 import {
@@ -33,6 +38,8 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   const [tab, setTab] = useState<'json' | 'png' | 'library'>('json');
   const [includeLegend, setIncludeLegend] = useState(true);
   const [includeScale, setIncludeScale] = useState(true);
+  const [scaleMultiplier, setScaleMultiplier] = useState<1 | 2>(1);
+  const [ornateFrame, setOrnateFrame] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [library, setLibrary] = useState<SavedMapSummary[]>(() => listSavedMaps());
@@ -72,12 +79,55 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
       includeScale,
       mapTheme: map.mapTheme ?? 'standard',
       activeSeason,
+      scaleMultiplier,
+      ornateFrame,
     });
     const a = document.createElement('a');
     a.href = dataUrl;
-    a.download = `${map.name.replace(/\s+/g, '_')}.png`;
+    a.download = `${map.name.replace(/\s+/g, '_')}${scaleMultiplier === 2 ? '_HD' : ''}.png`;
     a.click();
     setNotice('บันทึกภาพแผนที่ PNG เรียบร้อยแล้ว');
+  };
+
+  const handleDownloadHeightmap = () => {
+    const dataUrl = exportHeightmapPng(map, { scale: 4, seaZeroBaseline: false });
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `${map.name.replace(/\s+/g, '_')}_Heightmap.png`;
+    a.click();
+    setNotice('ส่งออก Heightmap ขาว-ดำ PNG เรียบร้อยแล้ว');
+  };
+
+  const handleDownloadWebAtlas = () => {
+    const imgUrl = exportMapToPng(map, {
+      overlay,
+      layers,
+      includeLegend: false,
+      includeScale: true,
+      mapTheme: map.mapTheme ?? 'standard',
+      activeSeason,
+    });
+    const html = exportInteractiveAtlasHtml(map, imgUrl);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${map.name.replace(/\s+/g, '_')}_Atlas.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setNotice('ส่งออก Interactive Web Atlas (.html) เรียบร้อยแล้ว');
+  };
+
+  const handleDownloadVttJson = () => {
+    const json = exportVttGridJson(map);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${map.name.replace(/\s+/g, '_')}.vtt.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setNotice('ส่งออก VTT Grid JSON เรียบร้อยแล้ว');
   };
 
   const handleSaveToLibrary = () => {
@@ -191,6 +241,22 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                     <FileText className="w-3.5 h-3.5" />
                     Lorebook (.html)
                   </button>
+                  <button
+                    onClick={handleDownloadWebAtlas}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1e2938] hover:bg-[#273548] border border-sky-500/40 text-sky-300 cursor-pointer"
+                    title="ส่งออกเว็บแผนที่แบบโต้ตอบได้ 1 ไฟล์ เปิดอ่าน/ซูมได้แบบออฟไลน์"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Interactive Atlas (.html)
+                  </button>
+                  <button
+                    onClick={handleDownloadVttJson}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1e2938] hover:bg-[#273548] border border-violet-500/40 text-violet-300 cursor-pointer"
+                    title="ส่งออกพิกัดตาราง Hex และจุดสำคัญสำหรับ VTT / Foundry / Roll20"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    VTT Grid (.json)
+                  </button>
                 </div>
               </div>
 
@@ -236,13 +302,48 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                 />
                 <span>แสดงสเกลระยะทางจริง (กม.) และเข็มทิศ</span>
               </label>
-              <button
-                onClick={handleDownloadPng}
-                className="flex items-center gap-1.5 px-4 py-2 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
-              >
-                <Camera className="w-4 h-4" />
-                สร้างและดาวน์โหลดภาพ PNG
-              </button>
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={ornateFrame}
+                  onChange={(e) => setOrnateFrame(e.target.checked)}
+                />
+                <span>กรอบแผนที่สไตล์ Poster / Cartographic Frame</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">ความละเอียดภาพ:</span>
+                {([1, 2] as const).map((sc) => (
+                  <button
+                    key={sc}
+                    type="button"
+                    onClick={() => setScaleMultiplier(sc)}
+                    className={`px-2.5 py-1 rounded border text-[11px] cursor-pointer ${
+                      scaleMultiplier === sc
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-semibold'
+                        : 'bg-[#161f2c] border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    {sc === 1 ? 'มาตรฐาน (1x)' : 'คมชัดพิเศษ Poster (2x HD)'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleDownloadPng}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded bg-[#d99b38] hover:bg-[#e5aa46] text-[#0e141c] font-semibold cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                  สร้างและดาวน์โหลดภาพ PNG
+                </button>
+                <button
+                  onClick={handleDownloadHeightmap}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded bg-[#1e2938] hover:bg-[#273548] border border-slate-600 text-slate-200 cursor-pointer"
+                  title="ส่งออกไฟล์ความสูงขาว-ดำ 8-bit สำหรับ Blender / Unreal / Unity"
+                >
+                  <Download className="w-4 h-4 text-sky-300" />
+                  ส่งออก Heightmap (ขาว-ดำ)
+                </button>
+              </div>
             </div>
           )}
 

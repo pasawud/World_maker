@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ArrowLeft,
   Building2,
   CloudSun,
   Compass,
@@ -7,6 +8,7 @@ import {
   Crown,
   Flame,
   FolderOpen,
+  HelpCircle,
   Landmark,
   Map as MapIcon,
   MapPin,
@@ -33,6 +35,8 @@ interface TopBarProps {
   onRenameMap: (name: string) => void;
   canUndo: boolean;
   canRedo: boolean;
+  undoCount?: number;
+  redoCount?: number;
   onUndo: () => void;
   onRedo: () => void;
   autosaveStatus: 'saved' | 'saving';
@@ -41,6 +45,8 @@ interface TopBarProps {
   onOpenLibrary: () => void;
   onOpenSizeModal: () => void;
   onOpenQuickSearch: () => void;
+  onOpenShortcuts?: () => void;
+  onOpenParentMap?: () => void;
   onQuickGenerateWorld: () => void;
 }
 
@@ -56,6 +62,7 @@ const TOOL_GROUPS: {
     { id: 'biome', label: 'ไบโอม', icon: <Trees className="w-3.5 h-3.5" />, shortcut: 'B' },
     { id: 'river', label: 'วาดแม่น้ำ', icon: <Waves className="w-3.5 h-3.5" />, shortcut: '3' },
     { id: 'current', label: 'กระแสน้ำ', icon: <Wind className="w-3.5 h-3.5" />, shortcut: 'C' },
+    { id: 'wind', label: 'ทิศทางลม', icon: <Compass className="w-3.5 h-3.5" />, shortcut: '' },
     { id: 'climate', label: 'ภูมิอากาศ', icon: <CloudSun className="w-3.5 h-3.5" />, shortcut: '' },
   ],
   [
@@ -81,6 +88,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onRenameMap,
   canUndo,
   canRedo,
+  undoCount,
+  redoCount,
   onUndo,
   onRedo,
   autosaveStatus,
@@ -89,6 +98,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenLibrary,
   onOpenSizeModal,
   onOpenQuickSearch,
+  onOpenShortcuts,
+  onOpenParentMap,
   onQuickGenerateWorld,
 }) => {
   const [editingTitle, setEditingTitle] = useState(false);
@@ -106,6 +117,17 @@ export const TopBar: React.FC<TopBarProps> = ({
           <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
           <span className="hidden xl:inline">คลังแผนที่</span>
         </button>
+
+        {map.parentMapLink && onOpenParentMap && (
+          <button
+            onClick={onOpenParentMap}
+            className="flex items-center gap-1 px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-[11px] text-sky-200 font-medium transition cursor-pointer shrink-0"
+            title={`กลับไปยังแผนที่โลกหลัก: ${map.parentMapLink.parentMapName}`}
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">กลับแผนที่หลัก</span>
+          </button>
+        )}
 
         {editingTitle ? (
           <input
@@ -186,6 +208,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
         >
           <Undo2 className="w-3.5 h-3.5" />
+          {undoCount !== undefined && undoCount > 0 && (
+            <span className="text-[10px] text-amber-300 tabular-nums">{undoCount}</span>
+          )}
         </button>
         <button
           onClick={onRedo}
@@ -194,6 +219,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] border border-slate-800 text-slate-300 hover:bg-[#202c3b] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
         >
           <Redo2 className="w-3.5 h-3.5" />
+          {redoCount !== undefined && redoCount > 0 && (
+            <span className="text-[10px] text-sky-300 tabular-nums">{redoCount}</span>
+          )}
         </button>
       </nav>
 
@@ -228,6 +256,16 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <MapIcon className="w-3.5 h-3.5" />
         </button>
+
+        {onOpenShortcuts && (
+          <button
+            onClick={onOpenShortcuts}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-[#17202b] hover:bg-[#202c3b] border border-slate-800 text-slate-300 transition cursor-pointer"
+            title="คีย์ลัดและการควบคุม (?)"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-sky-300" />
+          </button>
+        )}
 
         <button
           onClick={onQuickGenerateWorld}

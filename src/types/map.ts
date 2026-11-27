@@ -254,6 +254,7 @@ export interface GeographyConfig {
   lonWest?: number;
   lonEast?: number;
   windMode: WindMode;
+  windStrength?: number; // 0.2 .. 2.0, default 1.0
   moistureScale: number;
   riverThreshold: number;
   oceanCurrents?: boolean;
@@ -624,6 +625,30 @@ export interface CustomTectonicPlate {
   isOceanic?: boolean;
 }
 
+export type ManualWindKind = 'trade' | 'westerlies' | 'monsoon' | 'gale' | 'calm';
+
+export interface ManualWindPath {
+  id: string;
+  name?: string;
+  kind: ManualWindKind;
+  strength: number; // 0.4 .. 1.8
+  points: HexCoord[];
+}
+
+export interface SubMapLink {
+  id: string;
+  name: string;
+  bounds: SubMapBounds;
+  scaleFactor: number;
+}
+
+export interface ParentMapLink {
+  parentMapId: string;
+  parentMapName: string;
+  bounds: SubMapBounds;
+  scaleFactor: number;
+}
+
 export interface WorldCalendar {
   name: string;
   year: number;
@@ -663,7 +688,10 @@ export interface HexMapData {
   terrainOverrides?: Record<number, Partial<Omit<CustomTerrain, 'id'>>>;
   featureOverrides?: Record<string, Partial<Omit<SpecialFeatureMeta, 'id'>>>;
   manualCurrents?: ManualCurrentPath[];
+  manualWinds?: ManualWindPath[];
   customTectonicPlates?: CustomTectonicPlate[];
+  parentMapLink?: ParentMapLink;
+  childSubMaps?: SubMapLink[];
   customPoiTypes: CustomPoiType[];
   customGovernmentTypes?: CustomCategoryType[];
   customReligionTypes?: CustomCategoryType[];
@@ -687,6 +715,7 @@ export type ToolMode =
   | 'biome'
   | 'river'
   | 'current'
+  | 'wind'
   | 'city'
   | 'territory'
   | 'religion'
@@ -710,12 +739,15 @@ export type ClimateOverlay =
   | 'temperature'
   | 'moisture'
   | 'currents'
+  | 'winds'
   | 'tectonics';
 
 export interface LayerVisibility {
   grid: boolean;
   graticule?: boolean;
   currents?: boolean;
+  winds?: boolean;
+  submaps?: boolean;
   hillshade?: boolean;
   contours?: boolean;
   campaigns?: boolean;

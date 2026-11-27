@@ -12,6 +12,12 @@ interface HeightmapSubMapModalProps {
   referenceOverlay: ReferenceOverlayConfig | null;
   onChangeReferenceOverlay: (cfg: ReferenceOverlayConfig | null) => void;
   onReplaceMap: (nextMap: HexMapData) => void;
+  onRegisterChildSubMap?: (sub: {
+    id: string;
+    name: string;
+    bounds: SubMapBounds;
+    scaleFactor: number;
+  }) => void;
   onStartCanvasSelectZone?: () => void;
   onNotify: (msg: string) => void;
   onClose: () => void;
@@ -24,6 +30,7 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
   referenceOverlay,
   onChangeReferenceOverlay,
   onReplaceMap,
+  onRegisterChildSubMap,
   onStartCanvasSelectZone,
   onNotify,
   onClose,
@@ -191,20 +198,32 @@ export const HeightmapSubMapModal: React.FC<HeightmapSubMapModalProps> = ({
   };
 
   const handleCreateSubMap = () => {
-    saveMapToLibrary(map);
-    const sub = extractRegionalSubMap(
-      map,
-      {
-        minQ: Math.min(minQ, maxQ - 4),
-        maxQ: Math.max(maxQ, minQ + 4),
-        minR: Math.min(minR, maxR - 4),
-        maxR: Math.max(maxR, minR + 4),
+    const bounds: SubMapBounds = {
+      minQ: Math.min(minQ, maxQ - 4),
+      maxQ: Math.max(maxQ, minQ + 4),
+      minR: Math.min(minR, maxR - 4),
+      maxR: Math.max(maxR, minR + 4),
+    };
+    const sub = extractRegionalSubMap(map, bounds, scaleFactor, subMapName);
+    const linkedChild: HexMapData = {
+      ...sub,
+      parentMapLink: {
+        parentMapId: map.id,
+        parentMapName: map.name,
+        bounds,
+        scaleFactor,
       },
-      scaleFactor,
-      subMapName
-    );
-    onReplaceMap(sub);
-    onNotify(`สร้างแผนที่ภูมิภาค "${sub.name}" (${sub.width}×${sub.height}) แล้ว (แผนที่โลกเดิมถูกเซฟไว้ในคลังแล้ว)`);
+    };
+    const subLink = { id: linkedChild.id, name: linkedChild.name, bounds, scaleFactor };
+    const updatedParent: HexMapData = {
+      ...map,
+      childSubMaps: [...(map.childSubMaps ?? []).filter((c) => c.id !== subLink.id), subLink],
+    };
+    saveMapToLibrary(updatedParent);
+    saveMapToLibrary(linkedChild);
+    onRegisterChildSubMap?.(subLink);
+    onReplaceMap(linkedChild);
+    onNotify(`สร้างแผนที่ภูมิภาค "${linkedChild.name}" (${linkedChild.width}×${linkedChild.height}) แล้ว (เชื่อมโยงกลับแผนที่หลักแล้ว)`);
     onClose();
   };
 

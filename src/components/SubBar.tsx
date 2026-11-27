@@ -38,6 +38,7 @@ interface SubBarProps {
   onOpenSimulateModal: () => void;
   onOpenCustomModal: () => void;
   onOpenExportModal: () => void;
+  onApplyViewPreset?: (preset: 'standard' | 'parchment' | 'maritime' | 'geology' | 'strategy') => void;
 }
 
 const PRIMARY_VIEWS: { id: ClimateOverlay; label: string }[] = [
@@ -54,6 +55,7 @@ const ANALYTIC_VIEWS: { id: ClimateOverlay; label: string }[] = [
   { id: 'temperature', label: 'อุณหภูมิ' },
   { id: 'moisture', label: 'ความชื้น / ฝน' },
   { id: 'currents', label: 'กระแสน้ำมหาสมุทร' },
+  { id: 'winds', label: 'ทิศทางลม & เดินเรือ' },
   { id: 'tectonics', label: 'แผ่นเปลือกโลก (Tectonics)' },
 ];
 
@@ -77,6 +79,7 @@ export const SubBar: React.FC<SubBarProps> = ({
   onOpenSimulateModal,
   onOpenCustomModal,
   onOpenExportModal,
+  onApplyViewPreset,
 }) => {
   const [layersOpen, setLayersOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -110,8 +113,10 @@ export const SubBar: React.FC<SubBarProps> = ({
     { key: 'pois', label: 'จุดสำคัญ (POI)' },
     { key: 'graticule', label: 'เส้นพิกัดโลก' },
     { key: 'currents', label: 'กระแสน้ำมหาสมุทร' },
+    { key: 'winds', label: 'ทิศทางลม (Winds)' },
     { key: 'tectonics', label: 'ขอบแผ่นเปลือกโลก' },
     { key: 'chokepoints', label: 'จุดยุทธศาสตร์ (คอขวด)' },
+    { key: 'submaps', label: 'กรอบแผนที่ลูก (Sub-Maps)' },
   ];
 
   const activeLayerCount = toggleItems.filter((item) => layers[item.key]).length;
@@ -179,6 +184,30 @@ export const SubBar: React.FC<SubBarProps> = ({
           <option value="atlas" className="bg-[#0f1620] text-slate-100">ธีม: ภูมิศาสตร์ (Atlas)</option>
           <option value="dark" className="bg-[#0f1620] text-slate-100">ธีม: กลางคืน (VTT Dark)</option>
         </select>
+
+        {onApplyViewPreset && (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) {
+                onApplyViewPreset(
+                  e.target.value as 'standard' | 'parchment' | 'maritime' | 'geology' | 'strategy'
+                );
+              }
+            }}
+            className="hidden xl:block px-2 py-0.5 rounded border border-slate-800 bg-[#0f1620] text-[11px] text-amber-200 outline-none cursor-pointer hover:border-slate-700"
+            title="สลับพรีเซ็ตมุมมองและชั้นข้อมูลใน 1 คลิก"
+          >
+            <option value="" disabled className="bg-[#0f1620] text-slate-400">
+              พรีเซ็ตมุมมอง...
+            </option>
+            <option value="standard" className="bg-[#0f1620] text-slate-100">มาตรฐาน (ค่าเริ่มต้น)</option>
+            <option value="parchment" className="bg-[#0f1620] text-slate-100">แผนที่กระดาษโบราณ</option>
+            <option value="maritime" className="bg-[#0f1620] text-slate-100">เดินเรือ ลม & กระแสน้ำ</option>
+            <option value="geology" className="bg-[#0f1620] text-slate-100">ธรณีวิทยา & เปลือกโลก</option>
+            <option value="strategy" className="bg-[#0f1620] text-slate-100">ยุทธศาสตร์ & การทูต</option>
+          </select>
+        )}
 
         <div className="h-4 w-px bg-slate-800 mx-0.5 shrink-0" />
 

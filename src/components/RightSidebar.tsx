@@ -3,6 +3,7 @@ import {
   Camera,
   ChevronDown,
   ChevronRight,
+  Compass,
   Crown,
   Download,
   Eraser,
@@ -54,6 +55,7 @@ import {
   HexCoord,
   HexMapData,
   Kingdom,
+  ManualWindKind,
   MapLabel,
   MilitaryCampaign,
   Religion,
@@ -61,6 +63,7 @@ import {
   ToolMode,
   TradeMode,
   TravelSpeedId,
+  WindMode,
 } from '../types/map';
 import { CityInspector } from './CityInspector';
 import { ClimateGeneratorPanel } from './ClimateGeneratorPanel';
@@ -78,6 +81,13 @@ interface RightSidebarProps {
   onChangeCurrentDrawStrength: (n: number) => void;
   onUpdateGeography: (patch: Partial<GeographyConfig>) => void;
   onDeleteManualCurrent: (id: string) => void;
+  windKind: ManualWindKind;
+  onChangeWindKind: (k: ManualWindKind) => void;
+  windDrawStrength: number;
+  onChangeWindDrawStrength: (n: number) => void;
+  onDeleteManualWind: (id: string) => void;
+  onOpenLinkedMap?: (mapId: string) => void;
+  onOpenParentMap?: () => void;
   activeBiome: number;
   onSelectBiome: (b: number) => void;
   activeFeature: string | null;
@@ -163,6 +173,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
     onChangeCurrentDrawStrength,
     onUpdateGeography,
     onDeleteManualCurrent,
+    windKind,
+    onChangeWindKind,
+    windDrawStrength,
+    onChangeWindDrawStrength,
+    onDeleteManualWind,
+    onOpenLinkedMap,
+    onOpenParentMap,
     activeBiome,
     onSelectBiome,
     activeFeature,
@@ -503,6 +520,134 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
                     onClick={() => onDeleteManualCurrent(mc.id)}
                     className="text-slate-500 hover:text-rose-400 cursor-pointer"
                     title="ลบกระแสน้ำสายนี้"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tool === 'wind' && (
+        <div className="bg-[#151d28] border border-cyan-500/40 rounded-lg p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-cyan-300 flex items-center gap-1.5">
+              <Compass className="w-4 h-4" />
+              ระบบทิศทางลมและการเดินเรือ
+            </h3>
+            <button
+              onClick={() => onChangeOverlay(climateOverlay === 'winds' ? 'none' : 'winds')}
+              className={`px-2 py-0.5 rounded text-[10px] border cursor-pointer ${
+                climateOverlay === 'winds'
+                  ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
+                  : 'border-slate-700 text-slate-300'
+              }`}
+            >
+              {climateOverlay === 'winds' ? 'กำลังดูโหมดลม' : 'เปิดโหมดลม'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1 text-[10px]">
+            {(
+              [
+                ['trade', 'ลมค้า (Trade)'],
+                ['westerlies', 'ตะวันตก'],
+                ['monsoon', 'มรสุม'],
+                ['gale', 'พายุแรง'],
+                ['calm', 'เขตลมสงบ'],
+              ] as [ManualWindKind, string][]
+            ).map(([id, lbl]) => (
+              <button
+                key={id}
+                onClick={() => onChangeWindKind(id)}
+                className={`py-1 px-1 rounded border cursor-pointer truncate ${
+                  windKind === id
+                    ? id === 'gale'
+                      ? 'bg-rose-500/25 border-rose-400 text-rose-200'
+                      : id === 'calm'
+                      ? 'bg-slate-600/35 border-slate-400 text-slate-200'
+                      : 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
+                    : 'bg-[#0f1620] border-slate-800 text-slate-400'
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-1.5 text-[11px] bg-[#0f1620] border border-slate-800 rounded p-2">
+            <div>
+              <label className="block text-slate-400 mb-0.5">รูปแบบลมหลักของโลก</label>
+              <select
+                value={map.geography.windMode}
+                onChange={(e) => onUpdateGeography({ windMode: e.target.value as WindMode })}
+                className="w-full bg-[#151d28] border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-100 outline-none"
+              >
+                <option value="latitude">ตามแถบละติจูดจริง (Trade Winds & Westerlies)</option>
+                <option value="monsoon">มรสุมเขตร้อน + ลมประจำถิ่น (Monsoon)</option>
+                <option value="west">ลมพัดจากตะวันตก → ตะวันออก</option>
+                <option value="east">ลมพัดจากตะวันออก → ตะวันตก</option>
+                <option value="north">ลมพัดจากเหนือ → ใต้</option>
+                <option value="south">ลมพัดจากใต้ → เหนือ</option>
+                <option value="northeast">ลมมรสุมตะวันออกเฉียงเหนือ (NE → SW)</option>
+                <option value="southwest">ลมมรสุมตะวันตกเฉียงใต้ (SW → NE)</option>
+                <option value="northwest">ลมตะวันตกเฉียงเหนือ (NW → SE)</option>
+                <option value="southeast">ลมตะวันออกเฉียงใต้ (SE → NW)</option>
+              </select>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-slate-300">
+                <span>กำลังวาดแนวลม / พายุ</span>
+                <span className="text-amber-300">{windDrawStrength.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min={0.4}
+                max={1.8}
+                step={0.1}
+                value={windDrawStrength}
+                onChange={(e) => onChangeWindDrawStrength(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between text-slate-300">
+                <span>ความแรงลมทั่วโลก (Global Wind)</span>
+                <span className="text-cyan-300">{(map.geography.windStrength ?? 1).toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min={0.2}
+                max={2.0}
+                step={0.1}
+                value={map.geography.windStrength ?? 1.0}
+                onChange={(e) => onUpdateGeography({ windStrength: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          {(map.manualWinds ?? []).length > 0 && (
+            <div className="space-y-1 max-h-36 overflow-y-auto">
+              <div className="text-[11px] text-slate-400">
+                แนวลมที่วาดเอง ({map.manualWinds!.length} แนว)
+              </div>
+              {map.manualWinds!.map((mw, idx) => (
+                <div
+                  key={mw.id}
+                  className="flex items-center justify-between px-2 py-1 rounded bg-[#0f1620] border border-slate-800 text-[11px]"
+                >
+                  <span className="text-slate-200 truncate">
+                    แนวลม #{idx + 1} ({mw.kind} · {mw.strength.toFixed(1)}x)
+                  </span>
+                  <button
+                    onClick={() => onDeleteManualWind(mw.id)}
+                    className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                    title="ลบแนวลมนี้"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
@@ -1749,6 +1894,35 @@ export const RightSidebar: React.FC<RightSidebarProps> = (props) => {
             </span>
           </div>
         </div>
+
+        {(map.parentMapLink || (map.childSubMaps && map.childSubMaps.length > 0)) && (
+          <div className="bg-[#0f1620] border border-slate-800 rounded p-2 space-y-1.5 text-[11px]">
+            <div className="font-semibold text-sky-300">แผนที่แม่-ลูก (Linked Atlas)</div>
+            {map.parentMapLink && onOpenParentMap && (
+              <button
+                onClick={onOpenParentMap}
+                className="w-full py-1 px-2 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/50 text-sky-200 text-left truncate cursor-pointer"
+              >
+                ← กลับไปยัง "{map.parentMapLink.parentMapName}"
+              </button>
+            )}
+            {map.childSubMaps?.map((sub) => (
+              <div key={sub.id} className="flex items-center justify-between gap-1.5">
+                <span className="text-slate-300 truncate">
+                  🗺️ {sub.name} ({sub.scaleFactor}x)
+                </span>
+                {onOpenLinkedMap && (
+                  <button
+                    onClick={() => onOpenLinkedMap(sub.id)}
+                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-[10px] shrink-0 cursor-pointer"
+                  >
+                    เปิดดู
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-1.5 pt-1">
           <button

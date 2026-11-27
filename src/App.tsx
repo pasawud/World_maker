@@ -1,28 +1,60 @@
-import { useEffect, useState } from 'react';
-import { CalendarModal } from './components/CalendarModal';
-import { CityBlueprintModal } from './components/CityBlueprintModal';
-import { CityTradeModal } from './components/CityTradeModal';
-import { CustomAssetsModal, CustomStudioTab } from './components/CustomAssetsModal';
-import { EconomyModal } from './components/EconomyModal';
-import { EntityLoreModal } from './components/EntityLoreModal';
-import { ExportImportModal } from './components/ExportImportModal';
-import { HeightmapSubMapModal } from './components/HeightmapSubMapModal';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import type { CustomStudioTab } from './components/CustomAssetsModal';
 import { MapCanvas } from './components/MapCanvas';
-import { MapSizeModal } from './components/MapSizeModal';
-import { QuickSearchModal } from './components/QuickSearchModal';
 import { RightSidebar } from './components/RightSidebar';
 import { SubBar } from './components/SubBar';
 import { TimelineBar } from './components/TimelineBar';
-import { TimelineModal } from './components/TimelineModal';
 import { TopBar } from './components/TopBar';
-import { WorldbuildingModal } from './components/WorldbuildingModal';
-import { WorldSimulateModal } from './components/WorldSimulateModal';
 import { getAllPoiTypes } from './data/goods';
 import { hexDistance } from './engine/hexMath';
 import { exportMapToPng } from './engine/renderer';
+import { loadMapFromLibrary, saveMapToLibrary } from './engine/serialization';
 import { createInitialTimeline } from './engine/timeline';
 import { useMapEditor } from './hooks/useMapEditor';
 import { TerrainId, ToolMode } from './types/map';
+
+const CalendarModal = lazy(() =>
+  import('./components/CalendarModal').then((m) => ({ default: m.CalendarModal }))
+);
+const CityBlueprintModal = lazy(() =>
+  import('./components/CityBlueprintModal').then((m) => ({ default: m.CityBlueprintModal }))
+);
+const CityTradeModal = lazy(() =>
+  import('./components/CityTradeModal').then((m) => ({ default: m.CityTradeModal }))
+);
+const CustomAssetsModal = lazy(() =>
+  import('./components/CustomAssetsModal').then((m) => ({ default: m.CustomAssetsModal }))
+);
+const EconomyModal = lazy(() =>
+  import('./components/EconomyModal').then((m) => ({ default: m.EconomyModal }))
+);
+const EntityLoreModal = lazy(() =>
+  import('./components/EntityLoreModal').then((m) => ({ default: m.EntityLoreModal }))
+);
+const ExportImportModal = lazy(() =>
+  import('./components/ExportImportModal').then((m) => ({ default: m.ExportImportModal }))
+);
+const HeightmapSubMapModal = lazy(() =>
+  import('./components/HeightmapSubMapModal').then((m) => ({ default: m.HeightmapSubMapModal }))
+);
+const MapSizeModal = lazy(() =>
+  import('./components/MapSizeModal').then((m) => ({ default: m.MapSizeModal }))
+);
+const QuickSearchModal = lazy(() =>
+  import('./components/QuickSearchModal').then((m) => ({ default: m.QuickSearchModal }))
+);
+const ShortcutsModal = lazy(() =>
+  import('./components/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal }))
+);
+const TimelineModal = lazy(() =>
+  import('./components/TimelineModal').then((m) => ({ default: m.TimelineModal }))
+);
+const WorldbuildingModal = lazy(() =>
+  import('./components/WorldbuildingModal').then((m) => ({ default: m.WorldbuildingModal }))
+);
+const WorldSimulateModal = lazy(() =>
+  import('./components/WorldSimulateModal').then((m) => ({ default: m.WorldSimulateModal }))
+);
 
 export function App() {
   const editor = useMapEditor();
@@ -42,6 +74,7 @@ export function App() {
   const [showHeightmapModal, setShowHeightmapModal] = useState(false);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [showSimulateModal, setShowSimulateModal] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -73,6 +106,11 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         editor.redo();
+        return;
+      }
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowShortcuts((s) => !s);
         return;
       }
       if (e.key.toLowerCase() === 'g') {
@@ -134,12 +172,30 @@ export function App() {
       layers: editor.layers,
       includeLegend: true,
       includeScale: true,
+      activeSeason: editor.activeSeason,
     });
     const a = document.createElement('a');
     a.href = url;
     a.download = `${editor.map.name.replace(/\s+/g, '_')}.png`;
     a.click();
     showToast('ดาวน์โหลดภาพแผนที่ PNG แล้ว');
+  };
+
+  const openLinkedMapById = (targetId: string) => {
+    saveMapToLibrary(editor.map);
+    const loaded = loadMapFromLibrary(targetId);
+    if (!loaded) {
+      showToast('ไม่พบแผนที่ที่เชื่อมโยงไว้ในคลังในเครื่อง');
+      return;
+    }
+    editor.loadImportedMap(loaded);
+    showToast(`สลับไปยังแผนที่ "${loaded.name}" แล้ว`);
+  };
+
+  const handleOpenParentMap = () => {
+    const pId = editor.map.parentMapLink?.parentMapId;
+    if (!pId) return;
+    openLinkedMapById(pId);
   };
 
   return (
@@ -153,6 +209,8 @@ export function App() {
         }
         canUndo={editor.undoStack.length > 0}
         canRedo={editor.redoStack.length > 0}
+        undoCount={editor.undoStack.length}
+        redoCount={editor.redoStack.length}
         onUndo={editor.undo}
         onRedo={editor.redo}
         autosaveStatus={editor.autosaveStatus}
@@ -161,6 +219,8 @@ export function App() {
         onOpenLibrary={() => setShowExportModal(true)}
         onOpenSizeModal={() => setShowSizeModal(true)}
         onOpenQuickSearch={() => setShowQuickSearch(true)}
+        onOpenShortcuts={() => setShowShortcuts(true)}
+        onOpenParentMap={editor.map.parentMapLink ? handleOpenParentMap : undefined}
         onQuickGenerateWorld={handleQuickGenerate}
       />
 
@@ -187,6 +247,10 @@ export function App() {
         onOpenSimulateModal={() => setShowSimulateModal(true)}
         onOpenCustomModal={() => setCustomModalTab('terrains')}
         onOpenExportModal={() => setShowExportModal(true)}
+        onApplyViewPreset={(preset) => {
+          editor.applyViewPreset(preset);
+          showToast('สลับพรีเซ็ตมุมมองเรียบร้อยแล้ว');
+        }}
       />
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
@@ -251,6 +315,20 @@ export function App() {
           onEraseCurrentNear={(q, r) => {
             editor.eraseCurrentNear(q, r);
             showToast('ลบสายกระแสน้ำแล้ว');
+          }}
+          windSubTool={editor.windSubTool}
+          onChangeWindSubTool={editor.setWindSubTool}
+          windKind={editor.windKind}
+          onChangeWindKind={editor.setWindKind}
+          windDrawStrength={editor.windDrawStrength}
+          onChangeWindDrawStrength={editor.setWindDrawStrength}
+          onAddManualWind={(pts) => {
+            editor.addManualWind(pts);
+            showToast('เพิ่มแนวทิศทางลมบนแผนที่แล้ว');
+          }}
+          onEraseWindNear={(q, r) => {
+            editor.eraseWindNear(q, r);
+            showToast('ลบแนวลมแล้ว');
           }}
           roadType={editor.roadType}
           onChangeRoadType={editor.setRoadType}
@@ -474,6 +552,13 @@ export function App() {
               []
             )
           }
+          windKind={editor.windKind}
+          onChangeWindKind={editor.setWindKind}
+          windDrawStrength={editor.windDrawStrength}
+          onChangeWindDrawStrength={editor.setWindDrawStrength}
+          onDeleteManualWind={editor.deleteManualWind}
+          onOpenLinkedMap={openLinkedMapById}
+          onOpenParentMap={editor.map.parentMapLink ? handleOpenParentMap : undefined}
           activeBiome={editor.activeBiome}
           onSelectBiome={(b) => {
             editor.setActiveBiome(b);
@@ -604,7 +689,8 @@ export function App() {
         )}
       </div>
 
-      {showSizeModal && (
+      <Suspense fallback={null}>
+        {showSizeModal && (
         <MapSizeModal
           map={editor.map}
           onApply={(w, h, km, mode) => {
@@ -796,6 +882,7 @@ export function App() {
           referenceOverlay={editor.referenceOverlay}
           onChangeReferenceOverlay={editor.setReferenceOverlay}
           onReplaceMap={(nextMap) => editor.loadImportedMap(nextMap)}
+          onRegisterChildSubMap={editor.registerChildSubMap}
           onStartCanvasSelectZone={() => {
             editor.setPendingSubMapBounds(null);
             editor.setTool('submap');
@@ -845,6 +932,9 @@ export function App() {
           onClose={() => setShowQuickSearch(false)}
         />
       )}
+
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+      </Suspense>
     </div>
   );
 }

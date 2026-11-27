@@ -27,6 +27,12 @@ import {
   getCurrentCompassLabel,
   getCurrentKind,
 } from '../engine/currents';
+import {
+  computeWindField,
+  getWindBeltLabelTh,
+  getWindCompassLabel,
+  windSpeedKnots,
+} from '../engine/winds';
 import { formatElevationMeters, SculptMode } from '../engine/elevation';
 import {
   findHexPath,
@@ -54,6 +60,7 @@ import {
   LabelSize,
   LabelStyle,
   LayerVisibility,
+  ManualWindKind,
   PoiType,
   ReferenceOverlayConfig,
   RoadType,
@@ -97,6 +104,14 @@ interface MapCanvasProps {
   onChangeCurrentDrawStrength: (n: number) => void;
   onAddManualCurrent: (points: HexCoord[]) => void;
   onEraseCurrentNear: (q: number, r: number) => void;
+  windSubTool: 'draw' | 'erase';
+  onChangeWindSubTool: (t: 'draw' | 'erase') => void;
+  windKind: ManualWindKind;
+  onChangeWindKind: (k: ManualWindKind) => void;
+  windDrawStrength: number;
+  onChangeWindDrawStrength: (n: number) => void;
+  onAddManualWind: (points: HexCoord[]) => void;
+  onEraseWindNear: (q: number, r: number) => void;
   roadType: RoadType;
   onChangeRoadType: (t: RoadType) => void;
   roadSubTool: 'auto' | 'manual' | 'erase';
@@ -198,6 +213,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     onChangeCurrentDrawStrength,
     onAddManualCurrent,
     onEraseCurrentNear,
+    windSubTool,
+    onChangeWindSubTool,
+    windKind,
+    onChangeWindKind,
+    windDrawStrength,
+    onChangeWindDrawStrength,
+    onAddManualWind,
+    onEraseWindNear,
     roadType,
     onChangeRoadType,
     roadSubTool,
@@ -474,6 +497,19 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     [map.elevation, map.geography, map.height, map.manualCurrents, map.terrains, map.width]
   );
 
+  const windField = useMemo(
+    () =>
+      computeWindField(
+        map.width,
+        map.height,
+        map.elevation,
+        map.geography,
+        map.manualWinds,
+        activeSeason
+      ),
+    [activeSeason, map.elevation, map.geography, map.height, map.manualWinds, map.width]
+  );
+
   // Minimap
   useEffect(() => {
     if (!showMinimap) return;
@@ -625,6 +661,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
           warnOnce('วาดกระแสน้ำได้เฉพาะบนทะเลหรือมหาสมุทรเท่านั้น');
           return;
         }
+        isPaintingRef.current = true;
+        draftPathRef.current = [h];
+        setDraftPath([h]);
+      }
+    } else if (tool === 'wind') {
+      if (windSubTool === 'erase') {
+        onEraseWindNear(h.q, h.r);
+      } else {
         isPaintingRef.current = true;
         draftPathRef.current = [h];
         setDraftPath([h]);
@@ -793,6 +837,14 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         draftPathRef.current = next;
         setDraftPath(next);
       }
+    } else if (tool === 'wind' && windSubTool === 'draw') {
+      const cur = draftPathRef.current;
+      const last = cur[cur.length - 1];
+      if (!last || last.q !== h.q || last.r !== h.r) {
+        const next = [...cur, h];
+        draftPathRef.current = next;
+        setDraftPath(next);
+      }
     } else if (tool === 'biome' && terrainSubTool === 'brush') {
       const res = onPaintBiomeAt(h.q, h.r);
       if (res.warning) warnOnce(res.warning);
@@ -876,6 +928,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
         const pts = draftPathRef.current;
         if (pts.length >= 2) {
           onAddManualCurrent(pts);
+        }
+        draftPathRef.current = [];
+        setDraftPath([]);
+      } else if (tool === 'wind' && windSubTool === 'draw') {
+        const pts = draftPathRef.current;
+        if (pts.length >= 2) {
+          onAddManualWind(pts);
         }
         draftPathRef.current = [];
         setDraftPath([]);
@@ -969,6 +1028,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
     const curDir = isOceanHex
       ? getCurrentCompassLabel(oceanCurrentField.dx[idx], oceanCurrentField.dy[idx])
       : '';
+    const wSpd = windField.speed[idx] ?? 0.5;
+    const wBelt = windField.belt[idx] ?? 2;
+    const windDir = getWindCompassLabel(windField.dx[idx], windField.dy[idx]);
+    const windKnots = windSpeedKnots(wSpd);
+    const windLabel = getWindBeltLabelTh(wBelt, wSpd);
     const city = map.cities.find((c) => c.q === hoverHex.q && c.r === hoverHex.r);
     return {
       terrain,
@@ -985,9 +1049,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
       lonStr,
       curKind,
       curDir,
+      windDir,
+      windKnots,
+      windLabel,
       city,
     };
-  }, [hoverHex, map, oceanCurrentField, seasonalField]);
+  }, [hoverHex, map, oceanCurrentField, seasonalField, windField]);
 
   const activeTerrainMeta = getTerrainMetaWithCustom(
     activeTerrain,
@@ -1277,6 +1344,63 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
               <span className="text-slate-400 hidden sm:inline">
                 ลากบนทะเลเพื่อกำหนดทิศไหล
               </span>
+            </>
+          )}
+
+          {tool === 'wind' && (
+            <>
+              <button
+                onClick={() => onChangeWindSubTool('draw')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  windSubTool === 'draw' ? 'bg-cyan-500/25 text-cyan-200' : 'text-slate-400'
+                }`}
+              >
+                <Wind className="w-3.5 h-3.5" /> วาดแนวลม
+              </button>
+              <button
+                onClick={() => onChangeWindSubTool('erase')}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer ${
+                  windSubTool === 'erase' ? 'bg-rose-500/25 text-rose-200' : 'text-slate-400'
+                }`}
+              >
+                <Eraser className="w-3.5 h-3.5" /> ลบแนวลม
+              </button>
+              {windSubTool === 'draw' && (
+                <>
+                  <div className="h-4 w-px bg-slate-700" />
+                  {(
+                    [
+                      ['trade', 'ลมค้า'],
+                      ['westerlies', 'ตะวันตก'],
+                      ['monsoon', 'มรสุม'],
+                      ['gale', 'พายุแรง'],
+                      ['calm', 'ลมสงบ'],
+                    ] as [ManualWindKind, string][]
+                  ).map(([id, lbl]) => (
+                    <button
+                      key={id}
+                      onClick={() => onChangeWindKind(id)}
+                      className={`px-2 py-0.5 rounded border text-[11px] cursor-pointer ${
+                        windKind === id
+                          ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
+                          : 'bg-[#17202b] border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                  <span className="text-slate-400">แรง: {windDrawStrength.toFixed(1)}x</span>
+                  <input
+                    type="range"
+                    min={0.4}
+                    max={1.8}
+                    step={0.1}
+                    value={windDrawStrength}
+                    onChange={(e) => onChangeWindDrawStrength(Number(e.target.value))}
+                    className="w-16"
+                  />
+                </>
+              )}
             </>
           )}
 
@@ -1732,6 +1856,9 @@ export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
             </span>
           )}
           <span className="text-sky-300">{hoverInfo.temp.toFixed(1)}°C</span>
+          <span className="text-cyan-200" title={hoverInfo.windLabel}>
+            💨 {hoverInfo.windDir} {hoverInfo.windKnots} kt
+          </span>
           {hoverInfo.city && (
             <span className="text-amber-300 font-semibold">★ {hoverInfo.city.name}</span>
           )}

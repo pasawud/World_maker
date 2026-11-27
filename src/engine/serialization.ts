@@ -253,6 +253,9 @@ export function parseMapFromJson(raw: string): HexMapData {
         ? Math.max(0.2, Math.min(2.0, Number(geoRaw.currentStrength)))
         : 1.0,
       coriolisDirection: geoRaw.coriolisDirection === 'reversed' ? 'reversed' : 'normal',
+      windStrength: Number.isFinite(Number(geoRaw.windStrength))
+        ? Math.max(0.2, Math.min(2.0, Number(geoRaw.windStrength)))
+        : 1.0,
       tectonicPlates: Number.isFinite(Number(geoRaw.tectonicPlates))
         ? Math.max(4, Math.min(16, Math.round(Number(geoRaw.tectonicPlates))))
         : 8,
@@ -295,6 +298,16 @@ export function parseMapFromJson(raw: string): HexMapData {
         : {},
     manualCurrents: Array.isArray(obj.manualCurrents)
       ? (obj.manualCurrents as HexMapData['manualCurrents'])
+      : [],
+    manualWinds: Array.isArray(obj.manualWinds)
+      ? (obj.manualWinds as HexMapData['manualWinds'])
+      : [],
+    parentMapLink:
+      obj.parentMapLink && typeof obj.parentMapLink === 'object'
+        ? (obj.parentMapLink as HexMapData['parentMapLink'])
+        : undefined,
+    childSubMaps: Array.isArray(obj.childSubMaps)
+      ? (obj.childSubMaps as HexMapData['childSubMaps'])
       : [],
     customPoiTypes,
     customGovernmentTypes: Array.isArray(obj.customGovernmentTypes)
@@ -395,6 +408,9 @@ export function resizeMap(
       terrainOverrides: map.terrainOverrides ?? {},
       featureOverrides: map.featureOverrides ?? {},
       manualCurrents: [],
+      manualWinds: [],
+      parentMapLink: map.parentMapLink,
+      childSubMaps: [],
       customPoiTypes: map.customPoiTypes,
       customGovernmentTypes: map.customGovernmentTypes ?? [],
       customReligionTypes: map.customReligionTypes ?? [],
@@ -467,6 +483,21 @@ export function resizeMap(
       points: cur.points.filter((p) => inNewBounds(p.q, p.r)),
     }))
     .filter((cur) => cur.points.length >= 2);
+  const manualWinds = (map.manualWinds ?? [])
+    .map((w) => ({
+      ...w,
+      points: w.points.filter((p) => inNewBounds(p.q, p.r)),
+    }))
+    .filter((w) => w.points.length >= 2);
+  const childSubMaps = (map.childSubMaps ?? []).map((sub) => ({
+    ...sub,
+    bounds: {
+      minQ: Math.max(0, Math.min(safeW - 1, Math.round((sub.bounds.minQ / Math.max(1, map.width)) * safeW))),
+      maxQ: Math.max(0, Math.min(safeW - 1, Math.round((sub.bounds.maxQ / Math.max(1, map.width)) * safeW))),
+      minR: Math.max(0, Math.min(safeH - 1, Math.round((sub.bounds.minR / Math.max(1, map.height)) * safeH))),
+      maxR: Math.max(0, Math.min(safeH - 1, Math.round((sub.bounds.maxR / Math.max(1, map.height)) * safeH))),
+    },
+  }));
   const campaigns = (map.campaigns ?? [])
     .map((cp) => ({
       ...cp,
@@ -498,6 +529,8 @@ export function resizeMap(
     cultures,
     rivers,
     manualCurrents,
+    manualWinds,
+    childSubMaps,
     campaigns,
     bookmarks,
     customTectonicPlates,

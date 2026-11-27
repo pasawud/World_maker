@@ -1,6 +1,7 @@
 import { getBiomeMetaWithCustom, LEGACY_TERRAIN_BIOME_IDS } from '../data/biomes';
 import { getFeatureMetaWithCustom } from '../data/features';
 import { getTerrainMetaWithCustom, isWaterTerrainWithCustom } from '../data/terrains';
+import { computeWindField } from './winds';
 import {
   BiomeId,
   CustomBiome,
@@ -497,6 +498,12 @@ export function findHexPath(
     return base + slopePenalty;
   };
 
+  // Precompute wind field once for maritime/sailing routes
+  const windField =
+    mode === 'sea' || mode === 'mixed'
+      ? computeWindField(width, height, elevation, map.geography, map.manualWinds)
+      : null;
+
   const stepCost = (curIdx: number, nbIdx: number, isEndpoint: boolean): number => {
     const b = biomes[nbIdx];
     const terrain = getHexTerrain(map, nbIdx);
@@ -504,6 +511,21 @@ export function findHexPath(
     const isWater =
       meta.isWater ||
       isWaterTerrainWithCustom(terrain, map.customTerrains, map.terrainOverrides);
+
+    let windMul = 1.0;
+    if (windField && isWater) {
+      const cq = curIdx % width;
+      const cr = (curIdx - cq) / width;
+      const nq = nbIdx % width;
+      const nr = (nbIdx - nq) / width;
+      const sx = nq - cq;
+      const sy = nr - cr;
+      const sLen = Math.hypot(sx, sy) || 1;
+      const dot = (sx / sLen) * windField.dx[curIdx] + (sy / sLen) * windField.dy[curIdx];
+      const wSpd = Math.min(1.3, windField.speed[curIdx]);
+      // Downwind faster (cost ~0.68x), dead into headwind slower (cost ~1.38x)
+      windMul = Math.max(0.68, Math.min(1.38, 1 - 0.28 * dot * wSpd));
+    }
 
     if (mode === 'sea') {
       // Strictly water-only between ports/coastal endpoints!
@@ -516,7 +538,7 @@ export function findHexPath(
       const featDelta = feat ? feat.moveCostDelta : 0;
       const baseWater =
         terrain === TerrainId.LAKE ? 0.72 : terrain === TerrainId.SHALLOW_WATER ? 0.75 : 0.9;
-      return baseWater + Math.max(0, featDelta);
+      return (baseWater + Math.max(0, featDelta)) * windMul;
     }
 
     if (mode === 'land') {
@@ -525,12 +547,12 @@ export function findHexPath(
 
     // mixed mode
     if (isWater) {
-      return terrain === TerrainId.LAKE ? 0.72 : terrain === TerrainId.SHALLOW_WATER ? 0.8 : 0.95;
+      return (terrain === TerrainId.LAKE ? 0.72 : terrain === TerrainId.SHALLOW_WATER ? 0.8 : 0.95) * windMul;
     }
     return landCostForCell(curIdx, nbIdx);
   };
 
-  push(hexDistance(start, goal) * 0.7, startIdx);
+  push(hexDistance(start, goal) * 0.55, startIdx);
 
   let iterations = 0;
   const maxIter = Math.min(total * 4, 220000);
@@ -583,7 +605,7 @@ export function findHexPath(
       if (tentative < gScore[nbIdx]) {
         cameFrom[nbIdx] = curIdx;
         gScore[nbIdx] = tentative;
-        const h = hexDistance(nb, goal) * 0.7;
+        const h = hexDistance(nb, goal) * 0.55;
         push(tentative + h, nbIdx);
       }
     }

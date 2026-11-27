@@ -48,6 +48,7 @@ export const DEFAULT_GEOGRAPHY_CONFIG: GeographyConfig = {
   lonWest: -180,
   lonEast: 180,
   windMode: 'latitude',
+  windStrength: 1.0,
   moistureScale: 1.0,
   riverThreshold: 20,
   oceanCurrents: true,

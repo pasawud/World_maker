@@ -73,6 +73,7 @@ import {
   LayerVisibility,
   MapLabel,
   MapTheme,
+  ManualWindKind,
   MilitaryCampaign,
   PoiType,
   ReferenceOverlayConfig,
@@ -81,6 +82,7 @@ import {
   SeasonId,
   SpecialFeatureMeta,
   SubMapBounds,
+  SubMapLink,
   TerrainId,
   ToolMode,
   WorldCalendar,
@@ -117,6 +119,9 @@ export function useMapEditor() {
   const [currentSubTool, setCurrentSubTool] = useState<'draw' | 'erase'>('draw');
   const [currentKind, setCurrentKind] = useState<'warm' | 'cold' | 'neutral'>('warm');
   const [currentDrawStrength, setCurrentDrawStrength] = useState<number>(1.2);
+  const [windSubTool, setWindSubTool] = useState<'draw' | 'erase'>('draw');
+  const [windKind, setWindKind] = useState<ManualWindKind>('trade');
+  const [windDrawStrength, setWindDrawStrength] = useState<number>(1.0);
   const [roadType, setRoadType] = useState<RoadType>('stone');
   const [roadSubTool, setRoadSubTool] = useState<'auto' | 'manual' | 'erase'>('auto');
   const [tradeMode, setTradeMode] = useState<TradeMode>('mixed');
@@ -163,6 +168,8 @@ export function useMapEditor() {
     grid: false,
     graticule: false,
     currents: false,
+    winds: false,
+    submaps: true,
     hillshade: true,
     contours: false,
     campaigns: true,
@@ -1586,6 +1593,146 @@ export function useMapEditor() {
     [commitMapChange]
   );
 
+  const addManualWind = useCallback(
+    (points: HexCoord[]) => {
+      if (points.length < 2) return;
+      commitMapChange((prev) => ({
+        ...prev,
+        manualWinds: [
+          ...(prev.manualWinds ?? []),
+          {
+            id: `wind_${Date.now().toString(36)}`,
+            kind: windKind,
+            strength: windDrawStrength,
+            points,
+          },
+        ],
+      }));
+    },
+    [commitMapChange, windDrawStrength, windKind]
+  );
+
+  const eraseWindNear = useCallback(
+    (q: number, r: number) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        manualWinds: (prev.manualWinds ?? []).filter(
+          (mw) => !mw.points.some((p) => hexDistance(p, { q, r }) <= 2)
+        ),
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const deleteManualWind = useCallback(
+    (id: string) => {
+      commitMapChange((prev) => ({
+        ...prev,
+        manualWinds: (prev.manualWinds ?? []).filter((mw) => mw.id !== id),
+      }));
+    },
+    [commitMapChange]
+  );
+
+  const applyViewPreset = useCallback(
+    (preset: 'standard' | 'parchment' | 'maritime' | 'geology' | 'strategy') => {
+      const nextTheme: MapTheme =
+        preset === 'parchment'
+          ? 'parchment'
+          : preset === 'maritime'
+          ? 'atlas'
+          : preset === 'strategy'
+          ? 'dark'
+          : 'standard';
+      commitMapChange((prev) => ({ ...prev, mapTheme: nextTheme }), []);
+      if (preset === 'standard') {
+        setClimateOverlay('none');
+        setLayers((l) => ({
+          ...l,
+          hillshade: true,
+          contours: false,
+          currents: false,
+          winds: false,
+          tectonics: false,
+          chokepoints: false,
+          territories: true,
+          borders: true,
+          routes: true,
+          rivers: true,
+          pois: true,
+          labels: true,
+          cityNames: true,
+        }));
+      } else if (preset === 'parchment') {
+        setClimateOverlay('none');
+        setLayers((l) => ({
+          ...l,
+          hillshade: true,
+          contours: true,
+          currents: false,
+          winds: false,
+          tectonics: false,
+          chokepoints: false,
+          territories: false,
+          borders: true,
+          routes: true,
+          rivers: true,
+          labels: true,
+        }));
+      } else if (preset === 'maritime') {
+        setClimateOverlay('winds');
+        setLayers((l) => ({
+          ...l,
+          currents: true,
+          winds: true,
+          graticule: true,
+          tectonics: false,
+          chokepoints: true,
+          routes: true,
+          territories: false,
+          borders: true,
+        }));
+      } else if (preset === 'geology') {
+        setClimateOverlay('tectonics');
+        setLayers((l) => ({
+          ...l,
+          tectonics: true,
+          contours: true,
+          hillshade: true,
+          winds: false,
+          currents: false,
+          territories: false,
+        }));
+      } else if (preset === 'strategy') {
+        setClimateOverlay('political');
+        setLayers((l) => ({
+          ...l,
+          territories: true,
+          borders: true,
+          chokepoints: true,
+          campaigns: true,
+          routes: true,
+          winds: false,
+          tectonics: false,
+        }));
+      }
+    },
+    [commitMapChange]
+  );
+
+  const registerChildSubMap = useCallback(
+    (sub: SubMapLink) => {
+      commitMapChange(
+        (prev) => ({
+          ...prev,
+          childSubMaps: [...(prev.childSubMaps ?? []).filter((c) => c.id !== sub.id), sub],
+        }),
+        []
+      );
+    },
+    [commitMapChange]
+  );
+
   const addCustomPoiType = useCallback(
     (poi: Omit<CustomPoiType, 'id'>) => {
       const newPoi: CustomPoiType = {
@@ -2144,6 +2291,17 @@ export function useMapEditor() {
     setCurrentKind,
     currentDrawStrength,
     setCurrentDrawStrength,
+    windSubTool,
+    setWindSubTool,
+    windKind,
+    setWindKind,
+    windDrawStrength,
+    setWindDrawStrength,
+    addManualWind,
+    eraseWindNear,
+    deleteManualWind,
+    applyViewPreset,
+    registerChildSubMap,
     roadType,
     setRoadType,
     roadSubTool,

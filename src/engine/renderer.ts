@@ -45,6 +45,12 @@ import {
 import { detectStrategicChokepoints } from './strategy';
 import { computeTectonicField, TectonicField } from './tectonics';
 import {
+  computeWindField,
+  traceWindStreamlines,
+  WindField,
+  WindStreamline,
+} from './winds';
+import {
   formatLatitude,
   formatLongitude,
   getColLongitude,
@@ -256,6 +262,19 @@ function oceanCurrentFillColor(thermal: number, speed: number): string {
   return '#1a476e';
 }
 
+function windFillColor(belt: number, speed: number, isWater: boolean): string {
+  const baseDark: [number, number, number] = isWater ? [18, 38, 62] : [36, 42, 54];
+  if (belt === 0 || speed < 0.22) {
+    return mixRgb(baseDark, [71, 85, 105], 0.42);
+  }
+  const t = Math.min(1, speed / 1.1);
+  if (belt === 1) return mixRgb(baseDark, [34, 211, 238], 0.35 + t * 0.45); // Trade cyan
+  if (belt === 2) return mixRgb(baseDark, [251, 191, 36], 0.35 + t * 0.48); // Westerlies amber
+  if (belt === 3) return mixRgb(baseDark, [167, 139, 250], 0.35 + t * 0.45); // Polar violet
+  if (belt === 4) return mixRgb(baseDark, [52, 211, 153], 0.4 + t * 0.48); // Monsoon emerald
+  return mixRgb(baseDark, [251, 113, 133], 0.55 + t * 0.38); // Gale rose
+}
+
 function drawLakeDetails(
   ctx: CanvasRenderingContext2D,
   map: HexMapData,
@@ -356,6 +375,64 @@ function drawOceanCurrentStreams(
       pEnd.x - Math.cos(angle + 0.52) * headLen,
       pEnd.y - Math.sin(angle + 0.52) * headLen
     );
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawWindStreamlines(
+  ctx: CanvasRenderingContext2D,
+  streams: WindStreamline[],
+  hexRadius: number,
+  zoom: number
+): void {
+  if (streams.length === 0) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const st of streams) {
+    if (st.points.length < 2) continue;
+    const pts = st.points.map((pt) => hexToPixel(pt.q, pt.r, hexRadius));
+    const fgColor =
+      st.belt === 5
+        ? '#fb7185'
+        : st.belt === 4
+        ? '#34d399'
+        : st.belt === 2
+        ? '#fcd34d'
+        : st.belt === 3
+        ? '#c4b5fd'
+        : '#67e8f9';
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) * 0.5;
+      const my = (pts[i].y + pts[i + 1].y) * 0.5;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    const last = pts[pts.length - 1];
+    ctx.lineTo(last.x, last.y);
+
+    const w = Math.max(1.5, Math.min(3.0, 1.8 / Math.max(0.45, zoom * 0.65)));
+    ctx.strokeStyle = 'rgba(8, 15, 26, 0.52)';
+    ctx.lineWidth = w + 1.8;
+    ctx.stroke();
+
+    ctx.strokeStyle = fgColor;
+    ctx.lineWidth = w;
+    ctx.stroke();
+
+    const pPrev = pts[pts.length - 2];
+    const angle = Math.atan2(last.y - pPrev.y, last.x - pPrev.x);
+    const headLen = Math.max(6, w * 2.8);
+    ctx.fillStyle = fgColor;
+    ctx.beginPath();
+    ctx.moveTo(last.x + Math.cos(angle) * 2, last.y + Math.sin(angle) * 2);
+    ctx.lineTo(last.x - Math.cos(angle - 0.5) * headLen, last.y - Math.sin(angle - 0.5) * headLen);
+    ctx.lineTo(last.x - Math.cos(angle + 0.5) * headLen, last.y - Math.sin(angle + 0.5) * headLen);
     ctx.closePath();
     ctx.fill();
   }
@@ -1114,6 +1191,7 @@ export class ChunkedMapRenderer {
     streams: CurrentStreamline[];
   } | null = null;
   private tectonicCache: { key: string; field: TectonicField } | null = null;
+  private windCache: { key: string; field: WindField; streams: WindStreamline[] } | null = null;
   private seasonalCache: { key: string; temperature: Float32Array; snowMask: Uint8Array } | null =
     null;
 
@@ -1179,9 +1257,37 @@ export class ChunkedMapRenderer {
     return this.currentCache;
   }
 
+  private getWindData(
+    map: HexMapData,
+    activeSeason?: SeasonId | null
+  ): {
+    field: WindField;
+    streams: WindStreamline[];
+  } {
+    const mwSig = (map.manualWinds ?? [])
+      .map((w) => `${w.id}:${w.kind}:${w.strength}:${w.points.length}`)
+      .join(',');
+    const key = `${map.id}_${map.width}x${map.height}_${map.geography.latNorth}_${map.geography.latSouth}_${map.geography.lonWest ?? -180}_${map.geography.lonEast ?? 180}_${map.geography.windMode}_${map.geography.windStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}_${activeSeason ?? 'none'}_${mwSig}`;
+    if (this.windCache && this.windCache.key === key) {
+      return this.windCache;
+    }
+    const field = computeWindField(
+      map.width,
+      map.height,
+      map.elevation,
+      map.geography,
+      map.manualWinds,
+      activeSeason
+    );
+    const streams = traceWindStreamlines(map.width, map.height, field);
+    this.windCache = { key, field, streams };
+    return this.windCache;
+  }
+
   public invalidateAll(): void {
     this.chunks.clear();
     this.currentCache = null;
+    this.windCache = null;
   }
 
   public invalidateHexes(hexes: HexCoord[]): void {
@@ -1235,6 +1341,7 @@ export class ChunkedMapRenderer {
     const religionColorMap = new Map(map.religionList.map((r) => [r.id, r.color]));
     const cultureColorMap = new Map((map.cultureList ?? []).map((c) => [c.id, c.color]));
     const currentField = overlay === 'currents' ? this.getCurrentData(map).field : null;
+    const windField = overlay === 'winds' ? this.getWindData(map, activeSeason).field : null;
     const tectonicField =
       overlay === 'tectonics' || layers.tectonics ? this.getTectonicData(map) : null;
     const seasonalField = activeSeason ? this.getSeasonalData(map, activeSeason) : null;
@@ -1280,6 +1387,8 @@ export class ChunkedMapRenderer {
           } else {
             fill = mixRgb(hexToRgb(terrainMeta.color), [42, 50, 62], 0.45);
           }
+        } else if (overlay === 'winds' && windField) {
+          fill = windFillColor(windField.belt[idx], windField.speed[idx], isWater);
         } else if (overlay === 'terrain') {
           const rgb0 = hexToRgb(terrainMeta.color);
           const themed = applyThemeColor(rgb0, mapTheme, isWater, terrainId);
@@ -1663,7 +1772,10 @@ export class ChunkedMapRenderer {
     const customPlatesSig = (map.customTectonicPlates ?? [])
       .map((p) => `${p.id}:${Math.round(p.centerQ)}:${Math.round(p.centerR)}:${p.vx.toFixed(2)}:${p.vy.toFixed(2)}:${p.color}`)
       .join('|');
-    const customSig = `${mapTheme}_${activeSeason ?? 'none'}_${options.layers.hillshade !== false}_${Boolean(options.layers.contours)}_${Boolean(options.layers.tectonics)}_${map.geography.tectonicPlates ?? 8}_${customPlatesSig}_${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
+    const customWindsSig = (map.manualWinds ?? [])
+      .map((w) => `${w.id}:${w.kind}:${w.strength}:${w.points.length}`)
+      .join('|');
+    const customSig = `${mapTheme}_${activeSeason ?? 'none'}_${options.layers.hillshade !== false}_${Boolean(options.layers.contours)}_${Boolean(options.layers.tectonics)}_${Boolean(options.layers.winds)}_${options.layers.submaps !== false}_${map.geography.windMode}_${map.geography.windStrength ?? 1}_${map.geography.tectonicPlates ?? 8}_${customPlatesSig}_${customWindsSig}_${map.customBiomes.length}_${map.customTerrains?.length ?? 0}_${map.customFeatures?.length ?? 0}_${JSON.stringify(map.terrainOverrides ?? {})}_${JSON.stringify(map.featureOverrides ?? {})}_${map.geography.currentStrength ?? 1}_${map.geography.coriolisDirection ?? 'normal'}`;
     const flagsKey = `${options.layers.grid}_${options.layers.features}_${options.layers.territories}_${options.layers.borders}_${options.layers.religions}_${options.layers.cultures}_${customSig}`;
     if (
       map.id !== this.lastMapId ||
@@ -1751,6 +1863,10 @@ export class ChunkedMapRenderer {
       options.layers.currents || options.overlay === 'currents'
         ? this.getCurrentData(map).streams
         : undefined;
+    const windStreams =
+      options.layers.winds || options.overlay === 'winds' || options.tool === 'wind'
+        ? this.getWindData(map, activeSeason).streams
+        : undefined;
     const tectonicField =
       options.overlay === 'tectonics' || options.layers.tectonics
         ? this.getTectonicData(map)
@@ -1759,6 +1875,7 @@ export class ChunkedMapRenderer {
       ...options,
       mapTheme,
       currentStreams,
+      windStreams,
       tectonicField,
     });
 
@@ -1831,6 +1948,7 @@ function drawDynamicLayers(
     previewPath?: { hexes: HexCoord[]; valid: boolean } | null;
     measurePoints: HexCoord[];
     currentStreams?: CurrentStreamline[];
+    windStreams?: WindStreamline[];
     mapTheme?: MapTheme;
     tectonicField?: TectonicField;
     submapDraftBox?: { minQ: number; maxQ: number; minR: number; maxR: number } | null;
@@ -1901,6 +2019,68 @@ function drawDynamicLayers(
       ctx.lineTo(pEnd.x - Math.cos(ang + 0.52) * headLen, pEnd.y - Math.sin(ang + 0.52) * headLen);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // -0.5. Atmospheric wind streamlines + custom user-drawn winds
+  if (layers.winds || options.overlay === 'winds' || options.tool === 'wind') {
+    const wStreams =
+      options.windStreams ??
+      traceWindStreamlines(
+        map.width,
+        map.height,
+        computeWindField(map.width, map.height, map.elevation, map.geography, map.manualWinds)
+      );
+    drawWindStreamlines(ctx, wStreams, BASE_HEX_RADIUS, zoom);
+
+    for (const mw of map.manualWinds ?? []) {
+      if (!mw.points || mw.points.length < 2) continue;
+      ctx.save();
+      const stroke =
+        mw.kind === 'calm'
+          ? 'rgba(148, 163, 184, 0.85)'
+          : mw.kind === 'gale'
+          ? 'rgba(251, 113, 133, 0.92)'
+          : mw.kind === 'monsoon'
+          ? 'rgba(52, 211, 153, 0.92)'
+          : mw.kind === 'westerlies'
+          ? 'rgba(251, 191, 36, 0.92)'
+          : 'rgba(103, 232, 249, 0.92)';
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = Math.max(2.0, (1.6 + mw.strength * 1.2) / Math.max(0.55, zoom * 0.7));
+      ctx.setLineDash(mw.kind === 'calm' ? [5, 5] : [10, 4]);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      mw.points.forEach((pt, idx) => {
+        const p = hexToPixel(pt.q, pt.r, BASE_HEX_RADIUS);
+        if (idx === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (mw.kind !== 'calm') {
+        const pPrev = hexToPixel(
+          mw.points[mw.points.length - 2].q,
+          mw.points[mw.points.length - 2].r,
+          BASE_HEX_RADIUS
+        );
+        const pEnd = hexToPixel(
+          mw.points[mw.points.length - 1].q,
+          mw.points[mw.points.length - 1].r,
+          BASE_HEX_RADIUS
+        );
+        const ang = Math.atan2(pEnd.y - pPrev.y, pEnd.x - pPrev.x);
+        const headLen = Math.max(7, 8 / Math.max(0.55, zoom * 0.75));
+        ctx.fillStyle = stroke;
+        ctx.beginPath();
+        ctx.moveTo(pEnd.x, pEnd.y);
+        ctx.lineTo(pEnd.x - Math.cos(ang - 0.5) * headLen, pEnd.y - Math.sin(ang - 0.5) * headLen);
+        ctx.lineTo(pEnd.x - Math.cos(ang + 0.5) * headLen, pEnd.y - Math.sin(ang + 0.5) * headLen);
+        ctx.closePath();
+        ctx.fill();
+      }
       ctx.restore();
     }
   }
@@ -2474,7 +2654,34 @@ function drawDynamicLayers(
     }
   }
 
-  // 9d. Regional Sub-Map Drag Selection Box
+  // 9d. Regional Sub-Map Drag Selection Box & Linked Child Sub-Map Bounds
+  if (layers.submaps !== false && map.childSubMaps && map.childSubMaps.length > 0) {
+    for (const sub of map.childSubMaps) {
+      const pMin = hexToPixel(sub.bounds.minQ, sub.bounds.minR, BASE_HEX_RADIUS);
+      const pMax = hexToPixel(sub.bounds.maxQ, sub.bounds.maxR, BASE_HEX_RADIUS);
+      const rx = pMin.x - BASE_HEX_RADIUS * 0.8;
+      const ry = pMin.y - BASE_HEX_RADIUS * 0.8;
+      const rw = Math.max(BASE_HEX_RADIUS * 2, pMax.x - pMin.x + BASE_HEX_RADIUS * 1.6);
+      const rh = Math.max(BASE_HEX_RADIUS * 2, pMax.y - pMin.y + BASE_HEX_RADIUS * 1.6);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.06)';
+      ctx.lineWidth = Math.max(1.5, 2 / zoom);
+      ctx.setLineDash([6, 4]);
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+      if (zoom >= 0.32) {
+        ctx.font = '600 11px Sarabun, sans-serif';
+        ctx.fillStyle = '#7dd3fc';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(`🗺️ ${sub.name} (${sub.scaleFactor}x)`, rx + 6, ry + 14);
+      }
+      ctx.restore();
+    }
+  }
+
   if (options.submapDraftBox) {
     const pMin = hexToPixel(options.submapDraftBox.minQ, options.submapDraftBox.minR, BASE_HEX_RADIUS);
     const pMax = hexToPixel(options.submapDraftBox.maxQ, options.submapDraftBox.maxR, BASE_HEX_RADIUS);
@@ -2608,13 +2815,16 @@ export function exportMapToPng(
     includeScale: boolean;
     mapTheme?: MapTheme;
     activeSeason?: SeasonId | null;
+    scaleMultiplier?: 1 | 2;
+    ornateFrame?: boolean;
   }
 ): string {
   const mapTheme = options.mapTheme ?? map.mapTheme ?? 'standard';
   const maxDim = Math.max(map.width, map.height);
-  const hexRadius = maxDim > 200 ? 10 : maxDim > 140 ? 13 : 16;
-  const padTop = 64;
-  const padSide = 32;
+  const baseHexRadius = maxDim > 200 ? 10 : maxDim > 140 ? 13 : 16;
+  const hexRadius = baseHexRadius * (options.scaleMultiplier === 2 ? 1.75 : 1);
+  const padTop = options.ornateFrame ? 84 : 64;
+  const padSide = options.ornateFrame ? 48 : 32;
   const legendW = options.includeLegend ? 240 : 0;
 
   const mapW = Math.ceil(map.width * SQRT3 * hexRadius + hexRadius * 2);
@@ -2625,12 +2835,23 @@ export function exportMapToPng(
   canvas.height = mapH + padTop + padSide;
   const ctx = canvas.getContext('2d')!;
 
-  ctx.fillStyle = '#0e1722';
+  ctx.fillStyle = mapTheme === 'parchment' ? '#2c2218' : '#0e1722';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (options.ornateFrame) {
+    ctx.save();
+    ctx.strokeStyle = '#d99b38';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+    ctx.strokeStyle = 'rgba(217, 155, 56, 0.45)';
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(17, 17, canvas.width - 34, canvas.height - 34);
+    ctx.restore();
+  }
 
   ctx.fillStyle = '#f3d08a';
   ctx.font = '700 26px Cinzel, Sarabun, serif';
-  ctx.fillText(map.name, padSide, 34);
+  ctx.fillText(map.name, padSide, options.ornateFrame ? 44 : 34);
 
   const widthKm = Math.round(map.width * map.hexSizeKm);
   const heightKm = Math.round(map.height * map.hexSizeKm * (SQRT3 / 2));
@@ -2657,6 +2878,17 @@ export function exportMapToPng(
           map.geography,
           map.terrains,
           map.manualCurrents
+        )
+      : null;
+  const exportWinds =
+    options.overlay === 'winds' || options.layers.winds
+      ? computeWindField(
+          map.width,
+          map.height,
+          map.elevation,
+          map.geography,
+          map.manualWinds,
+          options.activeSeason
         )
       : null;
   const exportTectonics =
@@ -2703,6 +2935,8 @@ export function exportMapToPng(
             : isWater
             ? oceanCurrentFillColor(exportCurrents.thermal[idx], exportCurrents.speed[idx])
             : mixRgb(hexToRgb(terrainMeta.color), [42, 50, 62], 0.45)
+          : options.overlay === 'winds' && exportWinds
+          ? windFillColor(exportWinds.belt[idx], exportWinds.speed[idx], isWater)
           : options.overlay === 'tectonics' && exportTectonics
           ? (() => {
               const pColor =
@@ -2730,6 +2964,7 @@ export function exportMapToPng(
         options.overlay !== 'temperature' &&
         options.overlay !== 'moisture' &&
         options.overlay !== 'currents' &&
+        options.overlay !== 'winds' &&
         options.overlay !== 'tectonics' &&
         options.overlay !== 'terrain' &&
         options.overlay !== 'biome'
@@ -2962,6 +3197,10 @@ export function exportMapToPng(
           map.terrains
         )
       : undefined;
+  const exportWindStreams =
+    exportWinds && (options.overlay === 'winds' || options.layers.winds)
+      ? traceWindStreamlines(map.width, map.height, exportWinds)
+      : undefined;
   drawDynamicLayers(ctx, map, 1, {
     overlay: options.overlay,
     layers: options.layers,
@@ -2973,6 +3212,7 @@ export function exportMapToPng(
     draftPath: [],
     measurePoints: [],
     currentStreams: exportStreams,
+    windStreams: exportWindStreams,
     tectonicField: exportTectonics ?? undefined,
     mapTheme,
   });

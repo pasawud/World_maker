@@ -37,6 +37,12 @@ import {
   DEFAULT_WORLD_SIMULATION_OPTIONS,
   simulateAllFromCurrentMap,
 } from '../worldSimulator';
+import { exportInteractiveAtlasHtml, exportVttGridJson } from '../proExport';
+import {
+  computeWindField,
+  estimateSailingSpeedFactor,
+  traceWindStreamlines,
+} from '../winds';
 import {
   exportLorebookHtml,
   exportLorebookMarkdown,
@@ -1908,5 +1914,110 @@ describe('Map Themes, Curved Labels, Diplomacy/Wiki, Heightmap & Sub-Map', () =>
     expect(sim.territories?.some((t) => Boolean(t))).toBe(true);
     expect(sim.cultures?.some((c) => Boolean(c))).toBe(true);
     expect(sim.religions?.some((r) => Boolean(r))).toBe(true);
+  });
+
+  it('computes geographic wind belts, custom winds, wind-weighted sea sailing, pro exports, and linked sub-map atlas', () => {
+    const map = generateWorld(48, 36, 25, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 4242,
+      latNorth: 65,
+      latSouth: -5,
+      windMode: 'latitude',
+      windStrength: 1.2,
+    });
+    const wf = computeWindField(map.width, map.height, map.elevation, map.geography);
+    // Low latitudes (~15°N) blow Trade Winds westward (dx < 0), mid latitudes (~45°N) blow Westerlies eastward (dx > 0)
+    const midIdx = hexIndex(12, Math.floor(map.height * 0.28), map.width);
+    const tropIdx = hexIndex(12, Math.floor(map.height * 0.8), map.width);
+    expect(wf.dx[midIdx]).toBeGreaterThan(0);
+    expect(wf.dx[tropIdx]).toBeLessThan(0);
+
+    // Custom wind corridor (calm doldrums + gale corridor)
+    map.manualWinds = [
+      {
+        id: 'mw_calm',
+        kind: 'calm',
+        strength: 0.4,
+        points: [
+          { q: 20, r: 15 },
+          { q: 22, r: 15 },
+        ],
+      },
+      {
+        id: 'mw_gale',
+        kind: 'gale',
+        strength: 1.5,
+        points: [
+          { q: 5, r: 10 },
+          { q: 9, r: 10 },
+        ],
+      },
+    ];
+    const wfCustom = computeWindField(
+      map.width,
+      map.height,
+      map.elevation,
+      map.geography,
+      map.manualWinds,
+      'winter'
+    );
+    expect(wfCustom.belt[hexIndex(21, 15, map.width)]).toBe(0);
+    expect(wfCustom.speed[hexIndex(21, 15, map.width)]).toBeLessThan(0.25);
+    expect(wfCustom.belt[hexIndex(7, 10, map.width)]).toBe(5);
+    const streams = traceWindStreamlines(map.width, map.height, wfCustom);
+    expect(streams.length).toBeGreaterThan(5);
+
+    // Open sea test: sailing downwind eastward under 'west' wind costs strictly less than sailing upwind westward
+    const seaMap = generateWorld(28, 16, 20, {
+      ...DEFAULT_GEOGRAPHY_CONFIG,
+      seed: 111,
+      windMode: 'west',
+      windStrength: 1.4,
+    });
+    for (let i = 0; i < seaMap.width * seaMap.height; i++) {
+      seaMap.elevation[i] = -0.4;
+      seaMap.terrains![i] = TerrainId.DEEP_OCEAN;
+      seaMap.biomes[i] = BiomeId.DEEP_OCEAN;
+      seaMap.features[i] = '';
+    }
+    const seaWf = computeWindField(seaMap.width, seaMap.height, seaMap.elevation, seaMap.geography);
+    const downRes = findHexPath(seaMap, { q: 4, r: 8 }, { q: 22, r: 8 }, 'sea');
+    const upRes = findHexPath(seaMap, { q: 22, r: 8 }, { q: 4, r: 8 }, 'sea');
+    expect(downRes.reachable).toBe(true);
+    expect(upRes.reachable).toBe(true);
+    expect(downRes.weightedCost).toBeLessThan(upRes.weightedCost);
+    const sailEst = estimateSailingSpeedFactor(downRes.hexes, seaMap.width, seaMap.height, seaWf);
+    expect(sailEst.tailwindPct).toBeGreaterThan(50);
+
+    // Pro export & linked sub-map atlas persistence
+    const vtt = JSON.parse(exportVttGridJson(map));
+    expect(vtt.schema).toBe('hex-worldmaker-vtt-v1');
+    expect(vtt.grid.columns).toBe(map.width);
+    const atlasHtml = exportInteractiveAtlasHtml(map, 'data:image/png;base64,AA==');
+    expect(atlasHtml).toContain('<!doctype html>');
+    expect(atlasHtml).toContain(map.name);
+
+    map.parentMapLink = {
+      parentMapId: 'parent_1',
+      parentMapName: 'โลกแม่',
+      bounds: { minQ: 4, maxQ: 20, minR: 4, maxR: 16 },
+      scaleFactor: 3,
+    };
+    map.childSubMaps = [
+      {
+        id: 'child_1',
+        name: 'แคว้นชายฝั่ง',
+        bounds: { minQ: 6, maxQ: 18, minR: 6, maxR: 14 },
+        scaleFactor: 2,
+      },
+    ];
+    const restored = parseMapFromJson(serializeMapToJson(map));
+    expect(restored.geography.windStrength).toBe(1.2);
+    expect(restored.manualWinds?.length).toBe(2);
+    expect(restored.parentMapLink?.parentMapName).toBe('โลกแม่');
+    expect(restored.childSubMaps?.[0].name).toBe('แคว้นชายฝั่ง');
+    const resized = resizeMap(restored, 96, 72, 12, 'preserve');
+    expect(resized.childSubMaps?.[0].bounds.minQ).toBe(12);
+    expect(resized.manualWinds?.length).toBe(2);
   });
 });
